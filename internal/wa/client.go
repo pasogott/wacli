@@ -2,21 +2,17 @@ package wa
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
-	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
-	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
 type Options struct {
@@ -43,37 +39,6 @@ func New(opts Options) (*Client, error) {
 		return nil, err
 	}
 	return c, nil
-}
-
-func (c *Client) init() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	ctx := context.Background()
-	dbLog := waLog.Stdout("Database", "ERROR", true)
-	container, err := sqlstore.New(ctx, "sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", c.opts.StorePath), dbLog)
-	if err != nil {
-		return fmt.Errorf("open whatsmeow store: %w", err)
-	}
-
-	deviceStore, err := container.GetFirstDevice(ctx)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			deviceStore = container.NewDevice()
-		} else {
-			return fmt.Errorf("get device store: %w", err)
-		}
-	}
-
-	logger := waLog.Stdout("Client", "ERROR", true)
-	c.client = whatsmeow.NewClient(deviceStore, logger)
-	// Persist recently-sent messages so whatsmeow can answer retry-receipts
-	// across process restarts. Without this, recipients whose Signal session
-	// has not been freshly bootstrapped (typically other linked devices)
-	// see "Waiting for this message" indefinitely because whatsmeow can't
-	// find the original plaintext to re-encrypt when the retry arrives.
-	c.client.UseRetryMessageStore = true
-	return nil
 }
 
 func (c *Client) Close() {
@@ -256,25 +221,6 @@ func (c *Client) RequestHistorySyncOnDemand(ctx context.Context, lastKnown types
 		return "", err
 	}
 	return resp.ID, nil
-}
-
-func ParseUserOrJID(s string) (types.JID, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return types.JID{}, fmt.Errorf("recipient is required")
-	}
-	if strings.Contains(s, "@") {
-		return types.ParseJID(s)
-	}
-	s = strings.TrimPrefix(s, "+")
-	if s == "" {
-		return types.JID{}, fmt.Errorf("recipient is required")
-	}
-	return types.JID{User: s, Server: types.DefaultUserServer}, nil
-}
-
-func IsGroupJID(jid types.JID) bool {
-	return jid.Server == types.GroupServer
 }
 
 func (c *Client) GetContact(ctx context.Context, jid types.JID) (types.ContactInfo, error) {

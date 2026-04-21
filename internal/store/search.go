@@ -39,14 +39,18 @@ func escapeLIKE(s string) string {
 	return s
 }
 
+func likeContains(s string) string {
+	return "%" + escapeLIKE(s) + "%"
+}
+
 func (d *DB) searchLIKE(p SearchMessagesParams) ([]Message, error) {
 	query := `
 		SELECT m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''), ''
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
-		WHERE (LOWER(m.text) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.display_text) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.media_caption) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.filename) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(m.chat_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(m.sender_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(c.name,'')) LIKE LOWER(?) ESCAPE '\')`
+	WHERE (LOWER(m.text) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.display_text) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.media_caption) LIKE LOWER(?) ESCAPE '\' OR LOWER(m.filename) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(m.chat_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(m.sender_name,'')) LIKE LOWER(?) ESCAPE '\' OR LOWER(COALESCE(c.name,'')) LIKE LOWER(?) ESCAPE '\')`
 	// Escape wildcards before wrapping in % so user input is literal (#56).
-	needle := "%" + escapeLIKE(p.Query) + "%"
+	needle := likeContains(p.Query)
 	args := []interface{}{needle, needle, needle, needle, needle, needle, needle}
 	query, args = applyMessageFilters(query, args, p)
 	query += " ORDER BY m.ts DESC LIMIT ?"

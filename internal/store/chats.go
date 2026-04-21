@@ -27,8 +27,8 @@ func (d *DB) ListChats(query string, limit int) ([]Chat, error) {
 	q := `SELECT jid, kind, COALESCE(name,''), COALESCE(last_message_ts,0) FROM chats WHERE 1=1`
 	var args []interface{}
 	if strings.TrimSpace(query) != "" {
-		q += ` AND (LOWER(name) LIKE LOWER(?) OR LOWER(jid) LIKE LOWER(?))`
-		needle := "%" + query + "%"
+		q += ` AND (LOWER(name) LIKE LOWER(?) ESCAPE '\' OR LOWER(jid) LIKE LOWER(?) ESCAPE '\')`
+		needle := likeContains(query)
 		args = append(args, needle, needle)
 	}
 	q += ` ORDER BY last_message_ts DESC LIMIT ?`

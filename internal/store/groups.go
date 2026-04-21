@@ -59,8 +59,8 @@ func (d *DB) ListGroups(query string, limit int) ([]Group, error) {
 	q := `SELECT jid, COALESCE(name,''), COALESCE(owner_jid,''), COALESCE(created_ts,0), updated_at FROM groups WHERE 1=1`
 	var args []interface{}
 	if strings.TrimSpace(query) != "" {
-		needle := "%" + query + "%"
-		q += ` AND (LOWER(name) LIKE LOWER(?) OR LOWER(jid) LIKE LOWER(?))`
+		needle := likeContains(query)
+		q += ` AND (LOWER(name) LIKE LOWER(?) ESCAPE '\' OR LOWER(jid) LIKE LOWER(?) ESCAPE '\')`
 		args = append(args, needle, needle)
 	}
 	q += ` ORDER BY COALESCE(created_ts,0) DESC LIMIT ?`

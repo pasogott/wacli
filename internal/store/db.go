@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/steipete/wacli/internal/sqliteutil"
 )
 
 type DB struct {
@@ -35,6 +36,10 @@ func Open(path string) (*DB, error) {
 
 	s := &DB{path: path, sql: db}
 	if err := s.init(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := sqliteutil.ChmodFiles(path, 0o600); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

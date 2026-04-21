@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/steipete/wacli/internal/sqliteutil"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	waLog "go.mau.fi/whatsmeow/util/log"
@@ -17,9 +18,15 @@ func (c *Client) init() error {
 
 	ctx := context.Background()
 	dbLog := waLog.Stdout("Database", "ERROR", true)
+	if err := sqliteutil.ChmodFiles(c.opts.StorePath, 0o600); err != nil {
+		return err
+	}
 	container, err := sqlstore.New(ctx, "sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", c.opts.StorePath), dbLog)
 	if err != nil {
 		return fmt.Errorf("open whatsmeow store: %w", err)
+	}
+	if err := sqliteutil.ChmodFiles(c.opts.StorePath, 0o600); err != nil {
+		return err
 	}
 
 	deviceStore, err := container.GetFirstDevice(ctx)

@@ -4,11 +4,16 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/steipete/wacli/internal/app"
 	"github.com/steipete/wacli/internal/out"
 	"github.com/steipete/wacli/internal/store"
+	"github.com/steipete/wacli/internal/wa"
+	"go.mau.fi/whatsmeow/types"
 )
 
 func newMessagesCmd(flags *rootFlags) *cobra.Command {
@@ -78,8 +83,13 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 				fromMeFilter = &v
 			}
 
+			chatJIDs, err := messageChatJIDFilter(ctx, a, chat)
+			if err != nil {
+				return err
+			}
+
 			msgs, err := a.DB().ListMessages(store.ListMessagesParams{
-				ChatJID:   chat,
+				ChatJIDs:  chatJIDs,
 				SenderJID: sender,
 				Limit:     limit,
 				After:     after,
@@ -156,9 +166,14 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 				before = &t
 			}
 
+			chatJIDs, err := messageChatJIDFilter(ctx, a, chat)
+			if err != nil {
+				return err
+			}
+
 			msgs, err := a.DB().SearchMessages(store.SearchMessagesParams{
 				Query:     args[0],
-				ChatJID:   chat,
+				ChatJIDs:  chatJIDs,
 				From:      from,
 				Limit:     limit,
 				After:     after,
@@ -197,6 +212,59 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&msgType, "type", "", "message type filter (text|image|video|audio|document)")
 	cmd.Flags().BoolVar(&forwarded, "forwarded", false, "only forwarded messages")
 	return cmd
+}
+
+func messageChatJIDFilter(ctx context.Context, a *app.App, chat string) ([]string, error) {
+	chat = strings.TrimSpace(chat)
+	if chat == "" {
+		return nil, nil
+	}
+	jid, err := wa.ParseUserOrJID(chat)
+	if err != nil {
+		return nil, err
+	}
+	jids := []types.JID{canonicalMessageFilterJID(jid)}
+	if _, err := os.Stat(filepath.Join(a.StoreDir(), "session.db")); err != nil {
+		return jidStrings(jids), nil
+	}
+	if err := a.OpenWA(); err != nil {
+		return jidStrings(jids), nil
+	}
+	client := a.WA()
+	if client == nil {
+		return jidStrings(jids), nil
+	}
+	switch jid.Server {
+	case types.DefaultUserServer:
+		jids = append(jids, canonicalMessageFilterJID(client.ResolvePNToLID(ctx, jid)))
+	case types.HiddenUserServer:
+		jids = append(jids, canonicalMessageFilterJID(client.ResolveLIDToPN(ctx, jid)))
+	}
+	return jidStrings(jids), nil
+}
+
+func canonicalMessageFilterJID(jid types.JID) types.JID {
+	if jid.Server == types.DefaultUserServer {
+		return jid.ToNonAD()
+	}
+	return jid
+}
+
+func jidStrings(jids []types.JID) []string {
+	out := make([]string, 0, len(jids))
+	seen := make(map[string]struct{}, len(jids))
+	for _, jid := range jids {
+		if jid.IsEmpty() {
+			continue
+		}
+		s := jid.String()
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 func newMessagesShowCmd(flags *rootFlags) *cobra.Command {

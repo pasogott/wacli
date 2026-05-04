@@ -137,6 +137,18 @@ func (f *fakeWA) ResolveLIDToPN(ctx context.Context, jid types.JID) types.JID {
 	return jid
 }
 
+func (f *fakeWA) ResolvePNToLID(ctx context.Context, jid types.JID) types.JID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for lid, pn := range f.lids {
+		if pn == jid.ToNonAD() {
+			lid.Device = jid.Device
+			return lid
+		}
+	}
+	return jid
+}
+
 func (f *fakeWA) GetContact(ctx context.Context, jid types.JID) (types.ContactInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

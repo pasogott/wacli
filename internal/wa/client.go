@@ -306,6 +306,23 @@ func (c *Client) ResolveLIDToPN(ctx context.Context, jid types.JID) types.JID {
 	return pn
 }
 
+func (c *Client) ResolvePNToLID(ctx context.Context, jid types.JID) types.JID {
+	if jid.Server != types.DefaultUserServer {
+		return jid
+	}
+	c.mu.Lock()
+	cli := c.client
+	c.mu.Unlock()
+	if cli == nil || cli.Store == nil || cli.Store.LIDs == nil {
+		return jid
+	}
+	lid, err := cli.Store.LIDs.GetLIDForPN(ctx, jid.ToNonAD())
+	if err != nil || lid.IsEmpty() {
+		return jid
+	}
+	return lid
+}
+
 func BestContactName(info types.ContactInfo) string {
 	if !info.Found {
 		return ""

@@ -117,6 +117,37 @@ func TestSearchMessagesFiltersByMediaAndType(t *testing.T) {
 	}
 }
 
+func TestSearchMessagesFiltersMultipleChatJIDs(t *testing.T) {
+	db := openTestDB(t)
+	pn := "15551234567@s.whatsapp.net"
+	lid := "123456789@lid"
+	other := "other@s.whatsapp.net"
+	base := time.Date(2024, 4, 1, 0, 0, 0, 0, time.UTC)
+	for _, jid := range []string{pn, lid, other} {
+		if err := db.UpsertChat(jid, "dm", jid, base); err != nil {
+			t.Fatalf("UpsertChat %s: %v", jid, err)
+		}
+	}
+	rows := []UpsertMessageParams{
+		{ChatJID: pn, MsgID: "pn-row", SenderJID: pn, Timestamp: base, Text: "shared needle phone"},
+		{ChatJID: lid, MsgID: "lid-row", SenderJID: lid, Timestamp: base.Add(time.Second), Text: "shared needle hidden"},
+		{ChatJID: other, MsgID: "other-row", SenderJID: other, Timestamp: base.Add(2 * time.Second), Text: "shared needle other"},
+	}
+	for _, row := range rows {
+		if err := db.UpsertMessage(row); err != nil {
+			t.Fatalf("UpsertMessage %s: %v", row.MsgID, err)
+		}
+	}
+
+	msgs, err := db.SearchMessages(SearchMessagesParams{Query: "needle", ChatJIDs: []string{pn, lid}, Limit: 10})
+	if err != nil {
+		t.Fatalf("SearchMessages: %v", err)
+	}
+	if got := messageIDs(msgs); got != "lid-row,pn-row" {
+		t.Fatalf("ids = %s", got)
+	}
+}
+
 func TestSearchMessagesRejectsInvalidMediaFilters(t *testing.T) {
 	db := openTestDB(t)
 

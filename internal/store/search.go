@@ -9,6 +9,7 @@ import (
 type SearchMessagesParams struct {
 	Query     string
 	ChatJID   string
+	ChatJIDs  []string
 	From      string
 	Limit     int
 	Before    *time.Time
@@ -104,10 +105,7 @@ func (d *DB) searchFTS(p SearchMessagesParams) ([]Message, error) {
 }
 
 func applyMessageFilters(query string, args []interface{}, p SearchMessagesParams) (string, []interface{}) {
-	if strings.TrimSpace(p.ChatJID) != "" {
-		query += " AND m.chat_jid = ?"
-		args = append(args, p.ChatJID)
-	}
+	query, args = appendStringFilter(query, args, "m.chat_jid", p.ChatJID, p.ChatJIDs)
 	if strings.TrimSpace(p.From) != "" {
 		query += " AND m.sender_jid = ?"
 		args = append(args, p.From)

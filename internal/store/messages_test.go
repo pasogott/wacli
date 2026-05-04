@@ -135,6 +135,37 @@ func TestListMessagesFiltersAndOrdering(t *testing.T) {
 	}
 }
 
+func TestListMessagesFiltersMultipleChatJIDs(t *testing.T) {
+	db := openTestDB(t)
+	pn := "15551234567@s.whatsapp.net"
+	lid := "123456789@lid"
+	other := "other@s.whatsapp.net"
+	base := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+	for _, jid := range []string{pn, lid, other} {
+		if err := db.UpsertChat(jid, "dm", jid, base); err != nil {
+			t.Fatalf("UpsertChat %s: %v", jid, err)
+		}
+	}
+	rows := []UpsertMessageParams{
+		{ChatJID: pn, MsgID: "pn-row", SenderJID: pn, Timestamp: base, Text: "phone"},
+		{ChatJID: lid, MsgID: "lid-row", SenderJID: lid, Timestamp: base.Add(time.Second), Text: "hidden"},
+		{ChatJID: other, MsgID: "other-row", SenderJID: other, Timestamp: base.Add(2 * time.Second), Text: "other"},
+	}
+	for _, row := range rows {
+		if err := db.UpsertMessage(row); err != nil {
+			t.Fatalf("UpsertMessage %s: %v", row.MsgID, err)
+		}
+	}
+
+	msgs, err := db.ListMessages(ListMessagesParams{ChatJIDs: []string{pn, lid}, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if got := messageIDs(msgs); got != "lid-row,pn-row" {
+		t.Fatalf("ids = %s", got)
+	}
+}
+
 func TestListMessagesStableSameTimestampOrder(t *testing.T) {
 	db := openTestDB(t)
 	chat := "same-ts@s.whatsapp.net"

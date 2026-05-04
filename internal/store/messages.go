@@ -66,6 +66,7 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 
 type ListMessagesParams struct {
 	ChatJID   string
+	ChatJIDs  []string
 	SenderJID string
 	Limit     int
 	Before    *time.Time
@@ -85,10 +86,7 @@ func (d *DB) ListMessages(p ListMessagesParams) ([]Message, error) {
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		WHERE 1=1`
 	var args []interface{}
-	if strings.TrimSpace(p.ChatJID) != "" {
-		query += " AND m.chat_jid = ?"
-		args = append(args, p.ChatJID)
-	}
+	query, args = appendStringFilter(query, args, "m.chat_jid", p.ChatJID, p.ChatJIDs)
 	if p.After != nil {
 		query += " AND m.ts > ?"
 		args = append(args, unix(*p.After))
@@ -115,6 +113,41 @@ func (d *DB) ListMessages(p ListMessagesParams) ([]Message, error) {
 	}
 	args = append(args, p.Limit)
 	return d.scanMessages(query, args...)
+}
+
+func appendStringFilter(query string, args []interface{}, column, value string, values []string) (string, []interface{}) {
+	filterValues := uniqueNonEmptyStrings(append([]string{value}, values...))
+	switch len(filterValues) {
+	case 0:
+		return query, args
+	case 1:
+		query += " AND " + column + " = ?"
+		args = append(args, filterValues[0])
+		return query, args
+	default:
+		query += " AND " + column + " IN (" + strings.TrimRight(strings.Repeat("?,", len(filterValues)), ",") + ")"
+		for _, v := range filterValues {
+			args = append(args, v)
+		}
+		return query, args
+	}
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func (d *DB) GetMessage(chatJID, msgID string) (Message, error) {

@@ -169,6 +169,54 @@ func TestListMessagesFiltersMultipleChatJIDs(t *testing.T) {
 	}
 }
 
+func TestGetMessageReturnsRichDetails(t *testing.T) {
+	db := openTestDB(t)
+	chat := "123@s.whatsapp.net"
+	base := time.Date(2024, 3, 2, 0, 0, 0, 0, time.UTC)
+	if err := db.UpsertChat(chat, "dm", "Alice", base); err != nil {
+		t.Fatalf("UpsertChat: %v", err)
+	}
+	if err := db.UpsertMessage(UpsertMessageParams{
+		ChatJID:       chat,
+		ChatName:      "Alice",
+		MsgID:         "mid",
+		SenderJID:     chat,
+		SenderName:    "Alice Example",
+		Timestamp:     base,
+		Text:          "raw caption",
+		DisplayText:   "Sent image",
+		MediaType:     "image",
+		MediaCaption:  "raw caption",
+		Filename:      "pic.jpg",
+		MimeType:      "image/jpeg",
+		DirectPath:    "/direct/path",
+		MediaKey:      []byte{1, 2, 3},
+		FileSHA256:    []byte{4, 5},
+		FileEncSHA256: []byte{6, 7},
+		FileLength:    123,
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+	downloadedAt := base.Add(time.Second)
+	if err := db.MarkMediaDownloaded(chat, "mid", "/tmp/pic.jpg", downloadedAt); err != nil {
+		t.Fatalf("MarkMediaDownloaded: %v", err)
+	}
+
+	msg, err := db.GetMessage(chat, "mid")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if msg.SenderName != "Alice Example" || msg.DisplayText != "Sent image" {
+		t.Fatalf("unexpected text fields: %+v", msg)
+	}
+	if msg.MediaCaption != "raw caption" || msg.Filename != "pic.jpg" || msg.MimeType != "image/jpeg" || msg.DirectPath != "/direct/path" {
+		t.Fatalf("unexpected media fields: %+v", msg)
+	}
+	if msg.LocalPath != "/tmp/pic.jpg" || !msg.DownloadedAt.Equal(downloadedAt) {
+		t.Fatalf("unexpected download fields: %+v", msg)
+	}
+}
+
 func TestListMessagesStableSameTimestampOrder(t *testing.T) {
 	db := openTestDB(t)
 	chat := "same-ts@s.whatsapp.net"

@@ -59,6 +59,12 @@ type Message struct {
 	IsForwarded     bool
 	ForwardingScore uint32
 	MediaType       string
+	MediaCaption    string
+	Filename        string
+	MimeType        string
+	DirectPath      string
+	LocalPath       string
+	DownloadedAt    time.Time
 	Snippet         string
 	rowID           int64
 }

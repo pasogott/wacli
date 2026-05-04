@@ -79,6 +79,16 @@ func TestMessageFromPrefersSenderName(t *testing.T) {
 	}
 }
 
+func TestMessageFromDetailIncludesJID(t *testing.T) {
+	got := messageFromDetail(store.Message{
+		SenderJID:  "123@s.whatsapp.net",
+		SenderName: "Alice",
+	})
+	if got != "Alice (123@s.whatsapp.net)" {
+		t.Fatalf("messageFromDetail() = %q", got)
+	}
+}
+
 func TestWriteMessagesListFullOutput(t *testing.T) {
 	msg := store.Message{
 		ChatJID:     "chat@s.whatsapp.net",
@@ -106,6 +116,43 @@ func TestWriteMessagesListFullOutput(t *testing.T) {
 	}
 	if !strings.Contains(full.String(), "Reacted 👍 to hello") {
 		t.Fatalf("expected display text, got output:\n%s", full.String())
+	}
+}
+
+func TestWriteMessageShowPrefersDisplayTextAndMediaDetails(t *testing.T) {
+	msg := store.Message{
+		ChatJID:      "chat@s.whatsapp.net",
+		SenderJID:    "sender@s.whatsapp.net",
+		SenderName:   "Alice",
+		MsgID:        "mid",
+		Timestamp:    time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+		Text:         "raw payload",
+		DisplayText:  "Reacted 👍 to hello",
+		MediaType:    "image",
+		MediaCaption: "caption",
+		Filename:     "pic.jpg",
+		MimeType:     "image/jpeg",
+		LocalPath:    "/tmp/pic.jpg",
+		DownloadedAt: time.Date(2024, 1, 1, 12, 1, 0, 0, time.UTC),
+	}
+
+	var out bytes.Buffer
+	if err := writeMessageShow(&out, msg); err != nil {
+		t.Fatalf("writeMessageShow: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"From: Alice (sender@s.whatsapp.net)",
+		"Caption: caption",
+		"Filename: pic.jpg",
+		"MIME type: image/jpeg",
+		"Downloaded: /tmp/pic.jpg",
+		"Reacted 👍 to hello",
+		"Raw text:\nraw payload",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output missing %q:\n%s", want, got)
+		}
 	}
 }
 

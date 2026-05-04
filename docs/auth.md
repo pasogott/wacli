@@ -18,6 +18,7 @@ wacli auth logout
 - `--qr-format text` prints the raw QR payload for external renderers.
 - `--phone PHONE` uses WhatsApp phone-number pairing instead of QR pairing.
 - After pairing, auth runs bootstrap sync until idle unless `--follow` is set.
+- Bootstrap sync honors `WACLI_SYNC_MAX_MESSAGES` and `WACLI_SYNC_MAX_DB_SIZE` to cap local history growth.
 - `auth status` reports whether the local store is authenticated.
 - `auth logout` invalidates the linked-device session and requires writable mode.
 

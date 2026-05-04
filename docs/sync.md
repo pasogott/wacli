@@ -7,7 +7,7 @@ Read when: running continuous capture, one-shot sync, contact/group refresh, or 
 ## Command
 
 ```bash
-wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--download-media] [--refresh-contacts] [--refresh-groups]
+wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--max-messages N] [--max-db-size SIZE] [--download-media] [--refresh-contacts] [--refresh-groups]
 ```
 
 ## Modes
@@ -16,15 +16,20 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--downloa
 - `--once` exits after sync becomes idle.
 - `--idle-exit` controls idle exit timing in once mode.
 - `--max-reconnect 0` keeps reconnecting indefinitely.
+- `--max-messages N` stops before storing more than `N` total messages locally.
+- `--max-db-size SIZE` stops when `wacli.db` plus SQLite sidecars reaches `SIZE` (`500MB`, `2GB`, etc.).
 - `--download-media` runs a bounded media downloader for sync events.
 - `--refresh-contacts` imports contacts from the session store.
 - `--refresh-groups` fetches joined groups live and updates the local DB.
+- If neither storage cap is configured, sync prints one warning because WhatsApp history can grow the local database substantially.
+- `WACLI_SYNC_MAX_MESSAGES` and `WACLI_SYNC_MAX_DB_SIZE` apply the same caps to `auth` bootstrap sync and `sync`.
 
 ## Examples
 
 ```bash
 wacli sync --once
 wacli sync --follow --max-reconnect 10m
+wacli sync --follow --max-messages 250000 --max-db-size 2GB
 wacli sync --once --refresh-contacts --refresh-groups
 wacli sync --follow --download-media
 ```

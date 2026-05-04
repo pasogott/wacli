@@ -25,7 +25,7 @@ func newMediaEnqueuer(ctx context.Context, jobs chan<- mediaJob) func(chatJID, m
 	}
 }
 
-func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, enqueueMedia func(string, string)) uint32 {
+func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, messagesStored, lastEvent *atomic.Int64, disconnected chan<- struct{}, enqueueMedia func(string, string), limits *syncStorageLimits) uint32 {
 	var panicCount atomic.Int64
 	return a.wa.AddEventHandler(func(evt interface{}) {
 		// Recover from panics so unexpected message structures do not crash the
@@ -40,10 +40,10 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 		switch v := evt.(type) {
 		case *events.Message:
 			lastEvent.Store(nowUTC().UnixNano())
-			a.handleLiveSyncMessage(ctx, opts, v, messagesStored, enqueueMedia)
+			a.handleLiveSyncMessage(ctx, opts, v, messagesStored, enqueueMedia, limits)
 		case *events.HistorySync:
 			lastEvent.Store(nowUTC().UnixNano())
-			a.handleHistorySync(ctx, opts, v, messagesStored, lastEvent, enqueueMedia)
+			a.handleHistorySync(ctx, opts, v, messagesStored, lastEvent, enqueueMedia, limits)
 		case *events.Connected:
 			fmt.Fprintln(os.Stderr, "\nConnected.")
 		case *events.Disconnected:
@@ -56,7 +56,7 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 	})
 }
 
-func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *events.Message, messagesStored *atomic.Int64, enqueueMedia func(string, string)) {
+func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *events.Message, messagesStored *atomic.Int64, enqueueMedia func(string, string), limits ...*syncStorageLimits) {
 	if historySyncNotificationFromMessage(v) != nil {
 		return
 	}
@@ -64,7 +64,7 @@ func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *ev
 	if pm.ReactionToID != "" && pm.ReactionEmoji == "" && v.Message != nil && v.Message.GetEncReactionMessage() != nil {
 		a.decryptEncryptedReaction(ctx, &pm, v)
 	}
-	if err := a.storeParsedMessage(ctx, pm); err == nil {
+	if err := a.storeParsedMessageForSync(ctx, pm, limits...); err == nil {
 		messagesStored.Add(1)
 	}
 	if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
@@ -82,7 +82,7 @@ func historySyncNotificationFromMessage(v *events.Message) *waE2E.HistorySyncNot
 	return v.Message.GetProtocolMessage().GetHistorySyncNotification()
 }
 
-func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events.HistorySync, messagesStored, lastEvent *atomic.Int64, enqueueMedia func(string, string)) {
+func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events.HistorySync, messagesStored, lastEvent *atomic.Int64, enqueueMedia func(string, string), limits ...*syncStorageLimits) {
 	fmt.Fprintf(os.Stderr, "\nProcessing history sync (%d conversations)...\n", len(v.Data.Conversations))
 	for _, conv := range v.Data.Conversations {
 		lastEvent.Store(nowUTC().UnixNano())
@@ -107,8 +107,10 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 					a.decryptEncryptedReaction(ctx, &pm, evt)
 				}
 			}
-			if err := a.storeParsedMessage(ctx, pm); err == nil {
+			if err := a.storeParsedMessageForSync(ctx, pm, limits...); err == nil {
 				messagesStored.Add(1)
+			} else if ctx.Err() != nil {
+				return
 			}
 			if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
 				enqueueMedia(pm.Chat.String(), pm.ID)
@@ -116,6 +118,13 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 		}
 	}
 	fmt.Fprintf(os.Stderr, "\rSynced %d messages...", messagesStored.Load())
+}
+
+func (a *App) storeParsedMessageForSync(ctx context.Context, pm wa.ParsedMessage, limits ...*syncStorageLimits) error {
+	if len(limits) > 0 && limits[0] != nil {
+		return limits[0].StoreParsedMessage(ctx, pm)
+	}
+	return a.storeParsedMessage(ctx, pm)
 }
 
 func (a *App) decryptEncryptedReaction(ctx context.Context, pm *wa.ParsedMessage, msg *events.Message) {

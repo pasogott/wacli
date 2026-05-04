@@ -139,6 +139,7 @@ pnpm wacli presence paused --to 1234567890
 
 - `wacli auth`: interactive login (shows QR code), then immediately performs initial data sync.
 - `wacli sync`: non-interactive sync loop (never shows QR; errors if not authenticated).
+- `wacli sync` warns when local storage is uncapped; use `--max-messages` or `--max-db-size` to bound history growth.
 - Output is human-readable by default; pass `--json` for machine-readable output.
 - Pass `--full` to keep full IDs in table output; non-TTY output keeps full IDs automatically.
 - Pass `--read-only` or set `WACLI_READONLY=1` to block commands that intentionally mutate WhatsApp or the local store.
@@ -150,7 +151,7 @@ Full command docs live under [docs/overview.md](docs/overview.md). Quick referen
 - `wacli auth [--follow] [--idle-exit 30s] [--download-media] [--qr-format terminal|text] [--phone PHONE]`
 - `wacli auth status`
 - `wacli auth logout`
-- `wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--download-media] [--refresh-contacts] [--refresh-groups]`
+- `wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--max-messages N] [--max-db-size SIZE] [--download-media] [--refresh-contacts] [--refresh-groups]`
 - `wacli messages list [--chat JID] [--sender JID] [--from-me|--from-them] [--asc] [--limit N] [--after DATE] [--before DATE] [--forwarded]`
 - `wacli messages search <query> [--chat JID] [--from JID] [--has-media] [--type text|image|video|audio|document] [--forwarded]`
 - `wacli messages show --chat JID --id MSG_ID`
@@ -203,6 +204,8 @@ Global flags:
 - `WACLI_DEVICE_LABEL`: override the linked device label shown in WhatsApp (defaults to `wacli - <OS> (<hostname>)` when detectable).
 - `WACLI_DEVICE_PLATFORM`: override the linked device platform (defaults to `DESKTOP`; invalid values fall back to `CHROME`).
 - `WACLI_READONLY`: set to `1`, `true`, `yes`, or `on` to enable read-only mode.
+- `WACLI_SYNC_MAX_MESSAGES`: stop `auth` bootstrap sync or `sync` before storing more than this many total local messages.
+- `WACLI_SYNC_MAX_DB_SIZE`: stop `auth` bootstrap sync or `sync` when `wacli.db` plus SQLite sidecars reaches a size such as `500MB` or `2GB`.
 - `WACLI_STORE_DIR`: override the default store directory.
 
 ## Backfilling older history

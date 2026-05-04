@@ -41,6 +41,10 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			maxMessages, maxDBSize, err := resolveSyncStorageLimits(syncStorageLimitFlags{})
+			if err != nil {
+				return err
+			}
 			ctx, stop := signalContext()
 			defer stop()
 
@@ -66,6 +70,9 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 				OnQRCode:        authQRWriter(qrFormat, os.Stdout, os.Stderr),
 				PairPhoneNumber: pairPhone,
 				OnPairCode:      authPairCodeWriter(pairPhone, os.Stderr),
+				MaxMessages:     maxMessages,
+				MaxDBSizeBytes:  maxDBSize,
+				WarnNoLimits:    true,
 			})
 			if err != nil {
 				return err

@@ -27,6 +27,7 @@
 - Media: reject send-file uploads and media downloads larger than 100 MiB before reading or writing the payload. (#63 — thanks @alexander-morris)
 - Send: warn when send commands are invoked in rapid succession so automation rate-limit/account-risk is visible. (#53 — thanks @alexander-morris)
 - Send: validate phone-number recipients before constructing WhatsApp JIDs. (#144 — thanks @draix)
+- Sync: add message-count and database-size caps plus uncapped-sync warnings to avoid unbounded local history growth. (#54 — thanks @alexander-morris)
 - Store: restrict index and session SQLite database files to owner-only permissions. (#147 — thanks @draix)
 
 ### Fixed

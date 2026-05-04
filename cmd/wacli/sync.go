@@ -18,12 +18,17 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	var downloadMedia bool
 	var refreshContacts bool
 	var refreshGroups bool
+	var storage syncStorageLimitFlags
 
 	cmd := &cobra.Command{
 		Use:   "sync",
 		Short: "Sync messages (requires prior auth; never shows QR)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := flags.requireWritable(); err != nil {
+				return err
+			}
+			maxMessages, maxDBSize, err := resolveSyncStorageLimits(storage)
+			if err != nil {
 				return err
 			}
 			ctx, stop := signalContext()
@@ -56,6 +61,9 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 				RefreshGroups:   refreshGroups,
 				IdleExit:        idleExit,
 				MaxReconnect:    maxReconnect,
+				MaxMessages:     maxMessages,
+				MaxDBSizeBytes:  maxDBSize,
+				WarnNoLimits:    true,
 			})
 			if err != nil {
 				return err
@@ -79,5 +87,7 @@ func newSyncCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().BoolVar(&downloadMedia, "download-media", false, "download media in the background during sync")
 	cmd.Flags().BoolVar(&refreshContacts, "refresh-contacts", false, "refresh contacts from session store into local DB")
 	cmd.Flags().BoolVar(&refreshGroups, "refresh-groups", false, "refresh joined groups (live) into local DB")
+	cmd.Flags().Int64Var(&storage.maxMessages, "max-messages", 0, "maximum total messages to keep in the local DB before sync stops (0 = unlimited, or WACLI_SYNC_MAX_MESSAGES)")
+	cmd.Flags().StringVar(&storage.maxDBSize, "max-db-size", "", "maximum wacli.db disk usage before sync stops, e.g. 500MB or 2GB (default: WACLI_SYNC_MAX_DB_SIZE or unlimited)")
 	return cmd
 }

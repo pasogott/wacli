@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -32,7 +34,10 @@ type SyncOptions struct {
 	RefreshGroups   bool
 	IdleExit        time.Duration // only used for bootstrap/once
 	MaxReconnect    time.Duration // max time to attempt reconnection before giving up (0 = unlimited)
-	Verbosity       int           // future
+	MaxMessages     int64         // 0 = unlimited
+	MaxDBSizeBytes  int64         // 0 = unlimited
+	WarnNoLimits    bool
+	Verbosity       int // future
 }
 
 type SyncResult struct {
@@ -46,6 +51,16 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	if (opts.Mode == SyncModeBootstrap || opts.Mode == SyncModeOnce) && opts.IdleExit <= 0 {
 		opts.IdleExit = 30 * time.Second
 	}
+	if opts.WarnNoLimits && opts.MaxMessages <= 0 && opts.MaxDBSizeBytes <= 0 {
+		fmt.Fprintln(os.Stderr, "warning: sync storage is uncapped; use --max-messages or --max-db-size to bound local history growth")
+	}
+	if err := a.checkSyncStorageLimits(opts); err != nil {
+		return SyncResult{}, err
+	}
+
+	syncCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	limits := &syncStorageLimits{app: a, opts: opts, cancel: cancel}
 
 	if err := a.OpenWA(); err != nil {
 		return SyncResult{}, err
@@ -62,22 +77,22 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	enqueueMedia := func(chatJID, msgID string) {}
 	if opts.DownloadMedia {
 		mediaJobs = make(chan mediaJob, 512)
-		enqueueMedia = newMediaEnqueuer(ctx, mediaJobs)
+		enqueueMedia = newMediaEnqueuer(syncCtx, mediaJobs)
 	}
 
-	handlerID := a.addSyncEventHandler(ctx, opts, &messagesStored, &lastEvent, disconnected, enqueueMedia)
+	handlerID := a.addSyncEventHandler(syncCtx, opts, &messagesStored, &lastEvent, disconnected, enqueueMedia, limits)
 	defer a.wa.RemoveEventHandler(handlerID)
 
 	if opts.DownloadMedia {
 		var err error
-		stopMedia, err = a.runMediaWorkers(ctx, mediaJobs, 4)
+		stopMedia, err = a.runMediaWorkers(syncCtx, mediaJobs, 4)
 		if err != nil {
 			return SyncResult{}, err
 		}
 		defer stopMedia()
 	}
 
-	if err := a.wa.Connect(ctx, wa.ConnectOptions{
+	if err := a.wa.Connect(syncCtx, wa.ConnectOptions{
 		AllowQR:         opts.AllowQR,
 		OnQRCode:        opts.OnQRCode,
 		PairPhoneNumber: opts.PairPhoneNumber,
@@ -89,22 +104,77 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 
 	// Optional: bootstrap imports (helps contacts/groups management without waiting for events).
 	if opts.RefreshContacts {
-		_ = a.refreshContacts(ctx)
+		_ = a.refreshContacts(syncCtx)
 	}
 	if opts.RefreshGroups {
-		_ = a.refreshGroups(ctx)
+		_ = a.refreshGroups(syncCtx)
 	}
 	if opts.AfterConnect != nil {
-		if err := opts.AfterConnect(ctx); err != nil {
+		if err := opts.AfterConnect(syncCtx); err != nil {
 			return SyncResult{MessagesStored: messagesStored.Load()}, err
 		}
 	}
 
+	var err error
 	if opts.Mode == SyncModeFollow {
-		return a.runSyncFollow(ctx, opts.MaxReconnect, &messagesStored, disconnected)
+		_, err = a.runSyncFollow(syncCtx, opts.MaxReconnect, &messagesStored, disconnected)
+	} else {
+		_, err = a.runSyncUntilIdle(syncCtx, opts.IdleExit, opts.MaxReconnect, &messagesStored, &lastEvent, disconnected)
 	}
+	if limitErr := limits.Err(); limitErr != nil {
+		return SyncResult{MessagesStored: messagesStored.Load()}, limitErr
+	}
+	if err != nil {
+		return SyncResult{MessagesStored: messagesStored.Load()}, err
+	}
+	return SyncResult{MessagesStored: messagesStored.Load()}, nil
+}
 
-	return a.runSyncUntilIdle(ctx, opts.IdleExit, opts.MaxReconnect, &messagesStored, &lastEvent, disconnected)
+func (a *App) checkSyncStorageLimits(opts SyncOptions) error {
+	if opts.MaxMessages > 0 {
+		count, err := a.db.CountMessages()
+		if err != nil {
+			return fmt.Errorf("check message limit: %w", err)
+		}
+		if count >= opts.MaxMessages {
+			return syncStorageLimitError("message", count, opts.MaxMessages)
+		}
+	}
+	if opts.MaxDBSizeBytes > 0 {
+		size, err := a.dbDiskSize()
+		if err != nil {
+			return fmt.Errorf("check database size limit: %w", err)
+		}
+		if size >= opts.MaxDBSizeBytes {
+			return syncStorageLimitError("database size", size, opts.MaxDBSizeBytes)
+		}
+	}
+	return nil
+}
+
+func (a *App) dbDiskSize() (int64, error) {
+	var total int64
+	for _, path := range []string{
+		filepath.Join(a.opts.StoreDir, "wacli.db"),
+		filepath.Join(a.opts.StoreDir, "wacli.db-wal"),
+		filepath.Join(a.opts.StoreDir, "wacli.db-shm"),
+	} {
+		info, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return 0, err
+		}
+		if !info.IsDir() {
+			total += info.Size()
+		}
+	}
+	return total, nil
+}
+
+func syncStorageLimitError(kind string, got, limit int64) error {
+	return fmt.Errorf("sync storage limit reached: %s is %d, limit is %d", kind, got, limit)
 }
 
 func chatKind(chat types.JID) string {

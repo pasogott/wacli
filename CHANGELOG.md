@@ -27,6 +27,7 @@
 
 - Auth: propagate QR channel setup errors and surface actionable QR pairing failures. (#100 — thanks @pmatheus)
 - Build: fail cgo-disabled CLI builds at compile time instead of shipping a go-sqlite3 stub binary. (#194 — thanks @rajgopalv)
+- Chats: resolve mapped historical `@lid` chat rows in `chats list/show` output. (#31, #89 — thanks @bhaskoro-muthohar and @alexph-dev)
 - Groups: hide groups after `groups leave`, mark missing joined groups as left during refresh, and show them again if a later refresh reports membership. (#125, #129 — thanks @SeifBenayed and @ImLukeF)
 - History: cap on-demand backfill at 500 messages per request and 100 requests per run.
 - Messages: normalize device-specific `@s.whatsapp.net` JIDs before storing chats, contacts, and senders.

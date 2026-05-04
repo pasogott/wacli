@@ -62,6 +62,12 @@ func writeMessageShow(dst io.Writer, m store.Message) error {
 	if m.MediaType != "" {
 		fmt.Fprintf(dst, "Media: %s\n", m.MediaType)
 	}
+	if m.IsForwarded {
+		fmt.Fprintln(dst, "Forwarded: yes")
+		if m.ForwardingScore > 0 {
+			fmt.Fprintf(dst, "Forwarding score: %d\n", m.ForwardingScore)
+		}
+	}
 	fmt.Fprintf(dst, "\n%s\n", m.Text)
 	return nil
 }

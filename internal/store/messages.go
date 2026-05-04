@@ -7,33 +7,36 @@ import (
 )
 
 type UpsertMessageParams struct {
-	ChatJID       string
-	ChatName      string
-	MsgID         string
-	SenderJID     string
-	SenderName    string
-	Timestamp     time.Time
-	FromMe        bool
-	Text          string
-	DisplayText   string
-	MediaType     string
-	MediaCaption  string
-	Filename      string
-	MimeType      string
-	DirectPath    string
-	MediaKey      []byte
-	FileSHA256    []byte
-	FileEncSHA256 []byte
-	FileLength    uint64
+	ChatJID         string
+	ChatName        string
+	MsgID           string
+	SenderJID       string
+	SenderName      string
+	Timestamp       time.Time
+	FromMe          bool
+	Text            string
+	DisplayText     string
+	IsForwarded     bool
+	ForwardingScore uint32
+	MediaType       string
+	MediaCaption    string
+	Filename        string
+	MimeType        string
+	DirectPath      string
+	MediaKey        []byte
+	FileSHA256      []byte
+	FileEncSHA256   []byte
+	FileLength      uint64
 }
 
 func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 	_, err := d.sql.Exec(`
 		INSERT INTO messages(
 			chat_jid, chat_name, msg_id, sender_jid, sender_name, ts, from_me, text, display_text,
+			is_forwarded, forwarding_score,
 			media_type, media_caption, filename, mime_type, direct_path,
 			media_key, file_sha256, file_enc_sha256, file_length
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(chat_jid, msg_id) DO UPDATE SET
 			chat_name=COALESCE(NULLIF(excluded.chat_name,''), messages.chat_name),
 			sender_jid=excluded.sender_jid,
@@ -42,6 +45,8 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 			from_me=excluded.from_me,
 			text=excluded.text,
 			display_text=CASE WHEN excluded.display_text IS NOT NULL AND excluded.display_text != '' THEN excluded.display_text ELSE messages.display_text END,
+			is_forwarded=excluded.is_forwarded,
+			forwarding_score=excluded.forwarding_score,
 			media_type=excluded.media_type,
 			media_caption=excluded.media_caption,
 			filename=COALESCE(NULLIF(excluded.filename,''), messages.filename),
@@ -52,6 +57,7 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 			file_enc_sha256=CASE WHEN excluded.file_enc_sha256 IS NOT NULL AND length(excluded.file_enc_sha256)>0 THEN excluded.file_enc_sha256 ELSE messages.file_enc_sha256 END,
 			file_length=CASE WHEN excluded.file_length>0 THEN excluded.file_length ELSE messages.file_length END
 	`, p.ChatJID, nullIfEmpty(p.ChatName), p.MsgID, nullIfEmpty(p.SenderJID), nullIfEmpty(p.SenderName), unix(p.Timestamp), boolToInt(p.FromMe), nullIfEmpty(p.Text), nullIfEmpty(p.DisplayText),
+		boolToInt(p.IsForwarded), int64(p.ForwardingScore),
 		nullIfEmpty(p.MediaType), nullIfEmpty(p.MediaCaption), nullIfEmpty(p.Filename), nullIfEmpty(p.MimeType), nullIfEmpty(p.DirectPath),
 		p.MediaKey, p.FileSHA256, p.FileEncSHA256, int64(p.FileLength),
 	)
@@ -66,6 +72,7 @@ type ListMessagesParams struct {
 	After     *time.Time
 	FromMe    *bool
 	Asc       bool
+	Forwarded bool
 }
 
 func (d *DB) ListMessages(p ListMessagesParams) ([]Message, error) {
@@ -73,7 +80,7 @@ func (d *DB) ListMessages(p ListMessagesParams) ([]Message, error) {
 		p.Limit = 50
 	}
 	query := `
-		SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''), ''
+		SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), m.is_forwarded, m.forwarding_score, COALESCE(m.media_type,''), ''
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		WHERE 1=1`
@@ -98,6 +105,9 @@ func (d *DB) ListMessages(p ListMessagesParams) ([]Message, error) {
 		query += " AND m.from_me = ?"
 		args = append(args, boolToInt(*p.FromMe))
 	}
+	if p.Forwarded {
+		query += " AND m.is_forwarded = 1"
+	}
 	if p.Asc {
 		query += " ORDER BY m.ts ASC, m.rowid ASC LIMIT ?"
 	} else {
@@ -109,7 +119,7 @@ func (d *DB) ListMessages(p ListMessagesParams) ([]Message, error) {
 
 func (d *DB) GetMessage(chatJID, msgID string) (Message, error) {
 	row := d.sql.QueryRow(`
-		SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''), ''
+		SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), m.is_forwarded, m.forwarding_score, COALESCE(m.media_type,''), ''
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		WHERE m.chat_jid = ? AND m.msg_id = ?
@@ -117,11 +127,15 @@ func (d *DB) GetMessage(chatJID, msgID string) (Message, error) {
 	var m Message
 	var ts int64
 	var fromMe int
-	if err := row.Scan(&m.rowID, &m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &ts, &fromMe, &m.Text, &m.DisplayText, &m.MediaType, &m.Snippet); err != nil {
+	var forwarded int
+	var forwardingScore int64
+	if err := row.Scan(&m.rowID, &m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &ts, &fromMe, &m.Text, &m.DisplayText, &forwarded, &forwardingScore, &m.MediaType, &m.Snippet); err != nil {
 		return Message{}, err
 	}
 	m.Timestamp = fromUnix(ts)
 	m.FromMe = fromMe != 0
+	m.IsForwarded = forwarded != 0
+	m.ForwardingScore = uint32(forwardingScore)
 	return m, nil
 }
 
@@ -170,7 +184,7 @@ func (d *DB) MessageContext(chatJID, msgID string, before, after int) ([]Message
 	}
 
 	beforeRows, err := d.scanMessages(`
-		SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''), ''
+			SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), m.is_forwarded, m.forwarding_score, COALESCE(m.media_type,''), ''
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		WHERE m.chat_jid = ? AND (m.ts < ? OR (m.ts = ? AND m.rowid < ?))
@@ -182,7 +196,7 @@ func (d *DB) MessageContext(chatJID, msgID string, before, after int) ([]Message
 	}
 
 	afterRows, err := d.scanMessages(`
-		SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.media_type,''), ''
+			SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), m.is_forwarded, m.forwarding_score, COALESCE(m.media_type,''), ''
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		WHERE m.chat_jid = ? AND (m.ts > ? OR (m.ts = ? AND m.rowid > ?))
@@ -217,11 +231,15 @@ func (d *DB) scanMessages(query string, args ...interface{}) ([]Message, error) 
 		var m Message
 		var ts int64
 		var fromMe int
-		if err := rows.Scan(&m.rowID, &m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &ts, &fromMe, &m.Text, &m.DisplayText, &m.MediaType, &m.Snippet); err != nil {
+		var forwarded int
+		var forwardingScore int64
+		if err := rows.Scan(&m.rowID, &m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &ts, &fromMe, &m.Text, &m.DisplayText, &forwarded, &forwardingScore, &m.MediaType, &m.Snippet); err != nil {
 			return nil, err
 		}
 		m.Timestamp = fromUnix(ts)
 		m.FromMe = fromMe != 0
+		m.IsForwarded = forwarded != 0
+		m.ForwardingScore = uint32(forwardingScore)
 		out = append(out, m)
 	}
 	return out, rows.Err()

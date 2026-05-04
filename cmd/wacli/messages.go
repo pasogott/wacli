@@ -32,6 +32,7 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 	var fromMe bool
 	var fromThem bool
 	var asc bool
+	var forwarded bool
 
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -85,6 +86,7 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 				Before:    before,
 				FromMe:    fromMeFilter,
 				Asc:       asc,
+				Forwarded: forwarded,
 			})
 			if err != nil {
 				return err
@@ -109,6 +111,7 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().BoolVar(&fromMe, "from-me", false, "only messages sent by me")
 	cmd.Flags().BoolVar(&fromThem, "from-them", false, "only messages received (not sent by me)")
 	cmd.Flags().BoolVar(&asc, "asc", false, "show oldest messages first (default: newest first)")
+	cmd.Flags().BoolVar(&forwarded, "forwarded", false, "only forwarded messages")
 	return cmd
 }
 
@@ -120,6 +123,7 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 	var beforeStr string
 	var hasMedia bool
 	var msgType string
+	var forwarded bool
 
 	cmd := &cobra.Command{
 		Use:   "search <query>",
@@ -153,14 +157,15 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			msgs, err := a.DB().SearchMessages(store.SearchMessagesParams{
-				Query:    args[0],
-				ChatJID:  chat,
-				From:     from,
-				Limit:    limit,
-				After:    after,
-				Before:   before,
-				HasMedia: hasMedia,
-				Type:     msgType,
+				Query:     args[0],
+				ChatJID:   chat,
+				From:      from,
+				Limit:     limit,
+				After:     after,
+				Before:    before,
+				HasMedia:  hasMedia,
+				Type:      msgType,
+				Forwarded: forwarded,
 			})
 			if err != nil {
 				return err
@@ -190,6 +195,7 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&beforeStr, "before", "", "only messages before time (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().BoolVar(&hasMedia, "has-media", false, "only messages with media")
 	cmd.Flags().StringVar(&msgType, "type", "", "message type filter (text|image|video|audio|document)")
+	cmd.Flags().BoolVar(&forwarded, "forwarded", false, "only forwarded messages")
 	return cmd
 }
 

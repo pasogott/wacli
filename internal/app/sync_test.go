@@ -211,6 +211,37 @@ func TestStoreParsedMessageResolvesLIDChatAndSender(t *testing.T) {
 	}
 }
 
+func TestStoreParsedMessageStoresForwardedMetadata(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	err := a.storeParsedMessage(context.Background(), wa.ParsedMessage{
+		Chat:            chat,
+		ID:              "m-forwarded",
+		SenderJID:       chat.String(),
+		Timestamp:       time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		Text:            "forwarded",
+		IsForwarded:     true,
+		ForwardingScore: 4,
+	})
+	if err != nil {
+		t.Fatalf("storeParsedMessage: %v", err)
+	}
+
+	msg, err := a.db.GetMessage(chat.String(), "m-forwarded")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if !msg.IsForwarded {
+		t.Fatalf("expected forwarded message, got %+v", msg)
+	}
+	if msg.ForwardingScore != 4 {
+		t.Fatalf("ForwardingScore = %d, want 4", msg.ForwardingScore)
+	}
+}
+
 func TestSyncStoresDisplayText(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

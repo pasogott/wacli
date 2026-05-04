@@ -98,12 +98,42 @@ func TestWriteMessagesListFullOutput(t *testing.T) {
 
 func TestMessagesSearchCommandExposesMediaFilters(t *testing.T) {
 	cmd := newMessagesSearchCmd(&rootFlags{})
-	for _, name := range []string{"has-media", "type"} {
+	for _, name := range []string{"has-media", "type", "forwarded"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("expected --%s flag", name)
 		}
 	}
 	if got := cmd.Flags().Lookup("type").Usage; !strings.Contains(got, "text|image|video|audio|document") {
 		t.Fatalf("type usage = %q", got)
+	}
+}
+
+func TestMessagesListCommandExposesForwardedFilter(t *testing.T) {
+	cmd := newMessagesListCmd(&rootFlags{})
+	if cmd.Flags().Lookup("forwarded") == nil {
+		t.Fatalf("expected --forwarded flag")
+	}
+}
+
+func TestWriteMessageShowIncludesForwardedMetadata(t *testing.T) {
+	msg := store.Message{
+		ChatJID:         "chat@s.whatsapp.net",
+		SenderJID:       "sender@s.whatsapp.net",
+		MsgID:           "mid",
+		Timestamp:       time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+		Text:            "hello",
+		IsForwarded:     true,
+		ForwardingScore: 3,
+	}
+
+	var out bytes.Buffer
+	if err := writeMessageShow(&out, msg); err != nil {
+		t.Fatalf("writeMessageShow: %v", err)
+	}
+	if !strings.Contains(out.String(), "Forwarded: yes") {
+		t.Fatalf("expected forwarded marker, got:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "Forwarding score: 3") {
+		t.Fatalf("expected forwarding score, got:\n%s", out.String())
 	}
 }

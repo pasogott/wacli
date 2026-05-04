@@ -49,6 +49,17 @@ func TestSearchMessagesFiltersByMediaAndType(t *testing.T) {
 			Filename:     "report.pdf",
 			MimeType:     "application/pdf",
 		},
+		{
+			ChatJID:         chat,
+			ChatName:        "Alice",
+			MsgID:           "forwarded-1",
+			SenderJID:       chat,
+			SenderName:      "Alice",
+			Timestamp:       base.Add(3 * time.Second),
+			Text:            "forwarded memo",
+			IsForwarded:     true,
+			ForwardingScore: 1,
+		},
 	}
 	for _, row := range rows {
 		if err := db.UpsertMessage(row); err != nil {
@@ -85,6 +96,11 @@ func TestSearchMessagesFiltersByMediaAndType(t *testing.T) {
 			name: "has media plus concrete media type",
 			p:    SearchMessagesParams{Query: "report", Limit: 10, HasMedia: true, Type: "document"},
 			want: "document-1",
+		},
+		{
+			name: "forwarded",
+			p:    SearchMessagesParams{Query: "forwarded", Limit: 10, Forwarded: true},
+			want: "forwarded-1",
 		},
 	}
 

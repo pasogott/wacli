@@ -63,6 +63,8 @@ const coreSchemaSQL = `
 		from_me INTEGER NOT NULL,
 		text TEXT,
 		display_text TEXT,
+		is_forwarded INTEGER NOT NULL DEFAULT 0,
+		forwarding_score INTEGER NOT NULL DEFAULT 0,
 		media_type TEXT,
 		media_caption TEXT,
 		filename TEXT,

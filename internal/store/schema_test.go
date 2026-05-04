@@ -26,6 +26,8 @@ func TestOpenCreatesExpectedSchema(t *testing.T) {
 		"chat_name",
 		"sender_name",
 		"display_text",
+		"is_forwarded",
+		"forwarding_score",
 		"local_path",
 		"downloaded_at",
 	} {

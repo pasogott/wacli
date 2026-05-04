@@ -22,6 +22,10 @@ Other artifacts:
 - `wacli-linux-<arch>.tar.gz`
 - `wacli-windows-<arch>.zip`
 
+All release builds must use `CGO_ENABLED=1`. `wacli` depends on `go-sqlite3`,
+which provides only a runtime stub when cgo is disabled; the CLI build now fails
+early if someone tries to compile it with `CGO_ENABLED=0`.
+
 ## Homebrew Tap
 
 The release workflow dispatches the `Update Formula` workflow in `steipete/homebrew-tap` after the macOS artifact is published. The tap workflow owns the formula-editing logic and updates both the macOS artifact SHA256 and the Linux source archive SHA256 in `Formula/wacli.rb`.

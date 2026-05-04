@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -145,5 +146,47 @@ func TestWriteMessageShowIncludesForwardedMetadata(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Forwarding score: 3") {
 		t.Fatalf("expected forwarding score, got:\n%s", out.String())
+	}
+}
+
+func TestGetMessageByChatFilterTriesMappedChatJIDs(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "wacli.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	pn := "15551234567@s.whatsapp.net"
+	lid := "123456789@lid"
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	for _, jid := range []string{pn, lid} {
+		if err := db.UpsertChat(jid, "dm", jid, now); err != nil {
+			t.Fatalf("UpsertChat %s: %v", jid, err)
+		}
+	}
+	if err := db.UpsertMessage(store.UpsertMessageParams{
+		ChatJID:   lid,
+		MsgID:     "mid",
+		SenderJID: lid,
+		Timestamp: now,
+		Text:      "hello",
+	}); err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+
+	msg, err := getMessageByChatFilter(db, []string{pn, lid}, "mid")
+	if err != nil {
+		t.Fatalf("getMessageByChatFilter: %v", err)
+	}
+	if msg.ChatJID != lid {
+		t.Fatalf("ChatJID = %q, want %q", msg.ChatJID, lid)
+	}
+
+	msgs, err := getMessageContextByChatFilter(db, []string{pn, lid}, "mid", 1, 1)
+	if err != nil {
+		t.Fatalf("getMessageContextByChatFilter: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].ChatJID != lid {
+		t.Fatalf("context = %+v", msgs)
 	}
 }

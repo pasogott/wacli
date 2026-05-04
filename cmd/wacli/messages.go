@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -288,7 +290,11 @@ func newMessagesShowCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			m, err := a.DB().GetMessage(chat, id)
+			chatJIDs, err := messageChatJIDFilter(ctx, a, chat)
+			if err != nil {
+				return err
+			}
+			m, err := getMessageByChatFilter(a.DB(), chatJIDs, id)
 			if err != nil {
 				return err
 			}
@@ -329,7 +335,11 @@ func newMessagesContextCmd(flags *rootFlags) *cobra.Command {
 			}
 			defer closeApp(a, lk)
 
-			msgs, err := a.DB().MessageContext(chat, id, before, after)
+			chatJIDs, err := messageChatJIDFilter(ctx, a, chat)
+			if err != nil {
+				return err
+			}
+			msgs, err := getMessageContextByChatFilter(a.DB(), chatJIDs, id, before, after)
 			if err != nil {
 				return err
 			}
@@ -346,4 +356,44 @@ func newMessagesContextCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().IntVar(&before, "before", 5, "messages before")
 	cmd.Flags().IntVar(&after, "after", 5, "messages after")
 	return cmd
+}
+
+func getMessageByChatFilter(db *store.DB, chatJIDs []string, id string) (store.Message, error) {
+	var notFound error
+	for _, chatJID := range chatJIDs {
+		m, err := db.GetMessage(chatJID, id)
+		if err == nil {
+			return m, nil
+		}
+		if !isNoRows(err) {
+			return store.Message{}, err
+		}
+		notFound = err
+	}
+	if notFound != nil {
+		return store.Message{}, notFound
+	}
+	return store.Message{}, sql.ErrNoRows
+}
+
+func getMessageContextByChatFilter(db *store.DB, chatJIDs []string, id string, before, after int) ([]store.Message, error) {
+	var notFound error
+	for _, chatJID := range chatJIDs {
+		msgs, err := db.MessageContext(chatJID, id, before, after)
+		if err == nil {
+			return msgs, nil
+		}
+		if !isNoRows(err) {
+			return nil, err
+		}
+		notFound = err
+	}
+	if notFound != nil {
+		return nil, notFound
+	}
+	return nil, sql.ErrNoRows
+}
+
+func isNoRows(err error) bool {
+	return errors.Is(err, sql.ErrNoRows)
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/steipete/wacli/internal/wa"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
@@ -32,7 +33,9 @@ type fakeWA struct {
 	groups   map[types.JID]*types.GroupInfo
 	lids     map[types.JID]types.JID
 
-	onDemandHistory func(lastKnown types.MessageInfo, count int) *events.HistorySync
+	decryptedReaction  *waProto.ReactionMessage
+	decryptReactionErr error
+	onDemandHistory    func(lastKnown types.MessageInfo, count int) *events.HistorySync
 }
 
 func newFakeWA() *fakeWA {
@@ -258,7 +261,44 @@ func (f *fakeWA) SendChatPresence(ctx context.Context, jid types.JID, state type
 }
 
 func (f *fakeWA) DecryptReaction(ctx context.Context, reaction *events.Message) (*waProto.ReactionMessage, error) {
+	if f.decryptReactionErr != nil {
+		return nil, f.decryptReactionErr
+	}
+	if f.decryptedReaction != nil {
+		return f.decryptedReaction, nil
+	}
 	return nil, fmt.Errorf("not supported")
+}
+
+func (f *fakeWA) ParseWebMessage(chatJID types.JID, webMsg *waWeb.WebMessageInfo) (*events.Message, error) {
+	if chatJID.IsEmpty() {
+		parsed, err := types.ParseJID(webMsg.GetKey().GetRemoteJID())
+		if err != nil {
+			return nil, err
+		}
+		chatJID = parsed
+	}
+	sender := chatJID
+	if participant := webMsg.GetParticipant(); participant != "" {
+		parsed, err := types.ParseJID(participant)
+		if err != nil {
+			return nil, err
+		}
+		sender = parsed
+	}
+	return &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     chatJID,
+				Sender:   sender,
+				IsFromMe: webMsg.GetKey().GetFromMe(),
+				IsGroup:  chatJID.Server == types.GroupServer,
+			},
+			ID:        webMsg.GetKey().GetID(),
+			Timestamp: time.Unix(int64(webMsg.GetMessageTimestamp()), 0).UTC(),
+		},
+		Message: webMsg.GetMessage(),
+	}, nil
 }
 
 func (f *fakeWA) DownloadMediaToFile(ctx context.Context, directPath string, encFileHash, fileHash, mediaKey []byte, fileLength uint64, mediaType, mmsType string, targetPath string) (int64, error) {

@@ -64,6 +64,70 @@ func TestLiveSyncWarnsOnEncryptedReactionDecryptFailure(t *testing.T) {
 	}
 }
 
+func TestHistorySyncDecryptsEncryptedReaction(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	f.contacts[chat.ToNonAD()] = types.ContactInfo{Found: true, FullName: "Alice"}
+	f.decryptedReaction = &waProto.ReactionMessage{
+		Text: proto.String("❤️"),
+		Key:  &waCommon.MessageKey{ID: proto.String("m-text")},
+	}
+
+	base := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
+	textMsg := &waWeb.WebMessageInfo{
+		Key: &waCommon.MessageKey{
+			RemoteJID: proto.String(chat.String()),
+			FromMe:    proto.Bool(false),
+			ID:        proto.String("m-text"),
+		},
+		MessageTimestamp: proto.Uint64(uint64(base.Unix())),
+		Message:          &waProto.Message{Conversation: proto.String("hello")},
+	}
+	reactionMsg := &waWeb.WebMessageInfo{
+		Key: &waCommon.MessageKey{
+			RemoteJID: proto.String(chat.String()),
+			FromMe:    proto.Bool(false),
+			ID:        proto.String("m-enc-react"),
+		},
+		MessageTimestamp: proto.Uint64(uint64(base.Add(time.Second).Unix())),
+		Message: &waProto.Message{
+			EncReactionMessage: &waProto.EncReactionMessage{
+				TargetMessageKey: &waCommon.MessageKey{ID: proto.String("m-text")},
+			},
+		},
+	}
+	history := &events.HistorySync{
+		Data: &waHistorySync.HistorySync{
+			SyncType: waHistorySync.HistorySync_FULL.Enum(),
+			Conversations: []*waHistorySync.Conversation{{
+				ID:       proto.String(chat.String()),
+				Messages: []*waHistorySync.HistorySyncMsg{{Message: textMsg}, {Message: reactionMsg}},
+			}},
+		},
+	}
+
+	var messagesStored atomic.Int64
+	var lastEvent atomic.Int64
+	a.handleHistorySync(context.Background(), SyncOptions{}, history, &messagesStored, &lastEvent, func(string, string) {})
+
+	if messagesStored.Load() != 2 {
+		t.Fatalf("expected 2 stored messages, got %d", messagesStored.Load())
+	}
+	msg, err := a.db.GetMessage(chat.String(), "m-enc-react")
+	if err != nil {
+		t.Fatalf("GetMessage encrypted reaction: %v", err)
+	}
+	if msg.DisplayText != "Reacted ❤️ to hello" {
+		t.Fatalf("DisplayText = %q, want decrypted reaction display", msg.DisplayText)
+	}
+	if msg.ReactionToID != "m-text" || msg.ReactionEmoji != "❤️" {
+		t.Fatalf("unexpected reaction fields: to=%q emoji=%q", msg.ReactionToID, msg.ReactionEmoji)
+	}
+}
+
 func TestSyncStoresLiveAndHistoryMessages(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

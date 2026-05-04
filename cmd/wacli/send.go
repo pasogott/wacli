@@ -32,6 +32,7 @@ func newSendCmd(flags *rootFlags) *cobra.Command {
 
 func newSendTextCmd(flags *rootFlags) *cobra.Command {
 	var to string
+	var pick int
 	var message string
 	var replyTo string
 	var replyToSender string
@@ -59,12 +60,12 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 			if err := a.EnsureAuthed(); err != nil {
 				return err
 			}
-			if err := a.Connect(ctx, false, nil); err != nil {
+
+			toJID, err := resolveRecipient(a, to, recipientOptions{pick: pick, asJSON: flags.asJSON})
+			if err != nil {
 				return err
 			}
-
-			toJID, err := wa.ParseUserOrJID(to)
-			if err != nil {
+			if err := a.Connect(ctx, false, nil); err != nil {
 				return err
 			}
 
@@ -103,7 +104,8 @@ func newSendTextCmd(flags *rootFlags) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&to, "to", "", "recipient phone number (+E164 and formatting ok) or JID")
+	cmd.Flags().StringVar(&to, "to", "", "recipient JID, phone number, or contact/group/chat name")
+	cmd.Flags().IntVar(&pick, "pick", 0, "when --to is ambiguous, pick the Nth match (1-indexed)")
 	cmd.Flags().StringVar(&message, "message", "", "message text")
 	cmd.Flags().StringVar(&replyTo, "reply-to", "", "message ID to quote/reply to")
 	cmd.Flags().StringVar(&replyToSender, "reply-to-sender", "", "sender JID of the quoted message (required for unsynced group replies)")

@@ -7,11 +7,11 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/steipete/wacli/internal/out"
-	"github.com/steipete/wacli/internal/wa"
 )
 
 func newSendFileCmd(flags *rootFlags) *cobra.Command {
 	var to string
+	var pick int
 	var filePath string
 	var filename string
 	var caption string
@@ -42,12 +42,12 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 			if err := a.EnsureAuthed(); err != nil {
 				return err
 			}
-			if err := a.Connect(ctx, false, nil); err != nil {
+
+			toJID, err := resolveRecipient(a, to, recipientOptions{pick: pick, asJSON: flags.asJSON})
+			if err != nil {
 				return err
 			}
-
-			toJID, err := wa.ParseUserOrJID(to)
-			if err != nil {
+			if err := a.Connect(ctx, false, nil); err != nil {
 				return err
 			}
 
@@ -80,7 +80,8 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&to, "to", "", "recipient phone number (+E164 and formatting ok) or JID")
+	cmd.Flags().StringVar(&to, "to", "", "recipient JID, phone number, or contact/group/chat name")
+	cmd.Flags().IntVar(&pick, "pick", 0, "when --to is ambiguous, pick the Nth match (1-indexed)")
 	cmd.Flags().StringVar(&filePath, "file", "", "path to file")
 	cmd.Flags().StringVar(&filename, "filename", "", "display name for the file (defaults to basename of --file)")
 	cmd.Flags().StringVar(&caption, "caption", "", "caption (images/videos/documents)")

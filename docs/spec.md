@@ -176,9 +176,11 @@ WhatsApp Web history is best-effort. If you want to try fetching *older* message
 
 ### Send
 
-- `wacli send text --to PHONE_OR_JID --message TEXT`
-- `wacli send file --to PHONE_OR_JID --file PATH [--caption TEXT] [--mime TYPE] [--reply-to MSG_ID] [--reply-to-sender JID]`
+- `wacli send text --to RECIPIENT --message TEXT [--pick N]`
+- `wacli send file --to RECIPIENT --file PATH [--caption TEXT] [--mime TYPE] [--pick N] [--reply-to MSG_ID] [--reply-to-sender JID]`
 - `wacli send react --to PHONE_OR_JID --id MSG_ID [--reaction TEXT] [--sender JID]`
+
+`RECIPIENT` accepts a JID, phone number, or synced contact/group/chat name. If a name is ambiguous, interactive terminals prompt; scripts can pass `--pick N`.
 
 Send-file uploads and media downloads are capped at 100 MiB to avoid reading
 or writing unexpectedly large payloads in one command.

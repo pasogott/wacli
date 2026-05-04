@@ -79,7 +79,7 @@ func TestListMessagesFiltersAndOrdering(t *testing.T) {
 		}
 	}
 	rows := []UpsertMessageParams{
-		{ChatJID: chat, MsgID: "old-from-alice", SenderJID: "alice@s.whatsapp.net", Timestamp: base, Text: "old"},
+		{ChatJID: chat, MsgID: "old-from-alice", SenderJID: "alice@s.whatsapp.net", SenderName: "Alice", Timestamp: base, Text: "old"},
 		{ChatJID: chat, MsgID: "new-from-me", SenderJID: "me@s.whatsapp.net", Timestamp: base.Add(time.Second), FromMe: true, Text: "new"},
 		{ChatJID: chat, MsgID: "forwarded", SenderJID: "bob@s.whatsapp.net", Timestamp: base.Add(2 * time.Second), Text: "forwarded", IsForwarded: true, ForwardingScore: 2},
 		{ChatJID: otherChat, MsgID: "other-chat", SenderJID: "alice@s.whatsapp.net", Timestamp: base.Add(3 * time.Second), Text: "other"},
@@ -96,6 +96,9 @@ func TestListMessagesFiltersAndOrdering(t *testing.T) {
 	}
 	if got := messageIDs(msgs); got != "forwarded,new-from-me,old-from-alice" {
 		t.Fatalf("default order = %s", got)
+	}
+	if msgs[2].SenderName != "Alice" {
+		t.Fatalf("SenderName = %q, want Alice", msgs[2].SenderName)
 	}
 
 	msgs, err = db.ListMessages(ListMessagesParams{ChatJID: chat, Limit: 10, Asc: true})

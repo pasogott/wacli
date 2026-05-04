@@ -113,6 +113,9 @@ func TestSearchMessagesFiltersByMediaAndType(t *testing.T) {
 			if ids := messageIDs(got); ids != tc.want {
 				t.Fatalf("ids = %q, want %q", ids, tc.want)
 			}
+			if tc.name == "all matches" && got[2].SenderName != "Alice" {
+				t.Fatalf("SenderName = %q, want Alice", got[2].SenderName)
+			}
 		})
 	}
 }

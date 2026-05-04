@@ -66,6 +66,16 @@ func TestMessageContextLineFallsBackToMedia(t *testing.T) {
 	}
 }
 
+func TestMessageFromPrefersSenderName(t *testing.T) {
+	got := messageFrom(store.Message{
+		SenderJID:  "123456789@lid",
+		SenderName: "Alice",
+	})
+	if got != "Alice" {
+		t.Fatalf("messageFrom() = %q, want Alice", got)
+	}
+}
+
 func TestWriteMessagesListFullOutput(t *testing.T) {
 	msg := store.Message{
 		ChatJID:     "chat@s.whatsapp.net",

@@ -94,6 +94,9 @@ func messageFrom(m store.Message) string {
 	if m.FromMe {
 		return "me"
 	}
+	if name := strings.TrimSpace(m.SenderName); name != "" {
+		return name
+	}
 	return m.SenderJID
 }
 

@@ -51,6 +51,7 @@ type Message struct {
 	ChatName        string
 	MsgID           string
 	SenderJID       string
+	SenderName      string
 	Timestamp       time.Time
 	FromMe          bool
 	Text            string

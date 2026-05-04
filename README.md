@@ -35,9 +35,22 @@ If you install via Homebrew, you can skip the local build step.
 
 - `brew install steipete/tap/wacli`
 
+If a Linux install from the tap reports `Binary was compiled with 'CGO_ENABLED=0'`,
+update the tap and rebuild the formula:
+
+- `brew update`
+- `brew reinstall steipete/tap/wacli`
+
 ### Option B: Build locally
 
-- `go build -tags sqlite_fts5 -o ./dist/wacli ./cmd/wacli`
+`wacli` uses `go-sqlite3`, so local builds require cgo and a C compiler:
+
+- macOS: Xcode Command Line Tools are enough.
+- Debian/Ubuntu: `sudo apt install build-essential`
+
+Build:
+
+- `CGO_ENABLED=1 go build -tags sqlite_fts5 -o ./dist/wacli ./cmd/wacli`
 
 Run (local build only):
 

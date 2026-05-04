@@ -390,6 +390,9 @@ func TestSyncStoresDisplayText(t *testing.T) {
 	if msg.DisplayText != "Reacted 👍 to hello" {
 		t.Fatalf("unexpected reaction display text: %q", msg.DisplayText)
 	}
+	if msg.ReactionToID != "m-text" || msg.ReactionEmoji != "👍" {
+		t.Fatalf("unexpected reaction fields: to=%q emoji=%q", msg.ReactionToID, msg.ReactionEmoji)
+	}
 }
 
 func TestSyncMediaEnqueueUsesBoundedBackpressure(t *testing.T) {

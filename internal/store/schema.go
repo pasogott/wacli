@@ -65,6 +65,8 @@ const coreSchemaSQL = `
 		display_text TEXT,
 		is_forwarded INTEGER NOT NULL DEFAULT 0,
 		forwarding_score INTEGER NOT NULL DEFAULT 0,
+		reaction_to_id TEXT,
+		reaction_emoji TEXT,
 		media_type TEXT,
 		media_caption TEXT,
 		filename TEXT,

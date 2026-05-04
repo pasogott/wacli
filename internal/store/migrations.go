@@ -19,6 +19,7 @@ var schemaMigrations = []migration{
 	{version: 3, name: "messages fts", up: migrateMessagesFTS},
 	{version: 4, name: "groups left_at column", up: migrateGroupsLeftAt},
 	{version: 5, name: "messages forwarded columns", up: migrateMessagesForwardedColumns},
+	{version: 6, name: "messages reaction columns", up: migrateMessagesReactionColumns},
 }
 
 func (d *DB) ensureSchema() error {
@@ -116,6 +117,22 @@ func migrateMessagesForwardedColumns(d *DB) error {
 	if !hasScore {
 		if _, err := d.sql.Exec(`ALTER TABLE messages ADD COLUMN forwarding_score INTEGER NOT NULL DEFAULT 0`); err != nil {
 			return fmt.Errorf("add messages.forwarding_score column: %w", err)
+		}
+	}
+	return nil
+}
+
+func migrateMessagesReactionColumns(d *DB) error {
+	for _, col := range []string{"reaction_to_id", "reaction_emoji"} {
+		has, err := d.tableHasColumn("messages", col)
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
+		if _, err := d.sql.Exec(fmt.Sprintf("ALTER TABLE messages ADD COLUMN %s TEXT", col)); err != nil {
+			return fmt.Errorf("add messages.%s column: %w", col, err)
 		}
 	}
 	return nil

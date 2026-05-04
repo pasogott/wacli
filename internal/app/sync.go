@@ -221,6 +221,8 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 		DisplayText:     displayText,
 		IsForwarded:     pm.IsForwarded,
 		ForwardingScore: pm.ForwardingScore,
+		ReactionToID:    pm.ReactionToID,
+		ReactionEmoji:   pm.ReactionEmoji,
 		MediaType:       mediaType,
 		MediaCaption:    caption,
 		Filename:        filename,

@@ -185,6 +185,8 @@ func TestGetMessageReturnsRichDetails(t *testing.T) {
 		Timestamp:     base,
 		Text:          "raw caption",
 		DisplayText:   "Sent image",
+		ReactionToID:  "target-mid",
+		ReactionEmoji: "👍",
 		MediaType:     "image",
 		MediaCaption:  "raw caption",
 		Filename:      "pic.jpg",
@@ -208,6 +210,9 @@ func TestGetMessageReturnsRichDetails(t *testing.T) {
 	}
 	if msg.SenderName != "Alice Example" || msg.DisplayText != "Sent image" {
 		t.Fatalf("unexpected text fields: %+v", msg)
+	}
+	if msg.ReactionToID != "target-mid" || msg.ReactionEmoji != "👍" {
+		t.Fatalf("unexpected reaction fields: %+v", msg)
 	}
 	if msg.MediaCaption != "raw caption" || msg.Filename != "pic.jpg" || msg.MimeType != "image/jpeg" || msg.DirectPath != "/direct/path" {
 		t.Fatalf("unexpected media fields: %+v", msg)

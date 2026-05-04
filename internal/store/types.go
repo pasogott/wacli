@@ -58,6 +58,8 @@ type Message struct {
 	DisplayText     string
 	IsForwarded     bool
 	ForwardingScore uint32
+	ReactionToID    string
+	ReactionEmoji   string
 	MediaType       string
 	MediaCaption    string
 	Filename        string

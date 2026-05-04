@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steipete/wacli/internal/out"
@@ -48,6 +49,9 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			if err := a.Connect(ctx, false, nil); err != nil {
+				return err
+			}
+			if err := warnRapidSendIfNeeded(a.StoreDir(), time.Now().UTC(), os.Stderr); err != nil {
 				return err
 			}
 

@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -12,6 +15,8 @@ import (
 )
 
 const sendAttemptTimeout = 45 * time.Second
+const rapidSendWarningThreshold = 5 * time.Second
+const lastSendAttemptFile = ".last-send-at"
 
 func runSendOperation[T any](
 	ctx context.Context,
@@ -87,4 +92,27 @@ func reconnectForSend(a interface {
 		a.WA().Close()
 		return a.Connect(ctx, false, nil)
 	}
+}
+
+func warnRapidSendIfNeeded(storeDir string, now time.Time, stderr io.Writer) error {
+	path := filepath.Join(storeDir, lastSendAttemptFile)
+	data, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read last send marker: %w", err)
+	}
+	if err == nil {
+		last, parseErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(data)))
+		if parseErr == nil {
+			if elapsed := now.Sub(last); elapsed >= 0 && elapsed < rapidSendWarningThreshold {
+				fmt.Fprintf(stderr, "warning: send command was invoked %s after the previous send; rapid automated sends may trigger WhatsApp rate limits or account restrictions\n", elapsed.Round(time.Second))
+			}
+		}
+	}
+	if err := os.WriteFile(path, []byte(now.Format(time.RFC3339Nano)+"\n"), 0o600); err != nil {
+		return fmt.Errorf("write last send marker: %w", err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("chmod last send marker: %w", err)
+	}
+	return nil
 }

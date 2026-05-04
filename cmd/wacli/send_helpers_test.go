@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,5 +78,60 @@ func TestIsRetryableSendError(t *testing.T) {
 	}
 	if isRetryableSendError(errors.New("permission denied")) {
 		t.Fatalf("did not expect arbitrary error to be retryable")
+	}
+}
+
+func TestWarnRapidSendIfNeededWarnsAndUpdatesMarker(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	var stderr bytes.Buffer
+
+	if err := warnRapidSendIfNeeded(dir, now, &stderr); err != nil {
+		t.Fatalf("first warning check: %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("first send warned: %q", stderr.String())
+	}
+
+	if err := warnRapidSendIfNeeded(dir, now.Add(time.Second), &stderr); err != nil {
+		t.Fatalf("second warning check: %v", err)
+	}
+	if got := stderr.String(); !strings.Contains(got, "warning: send command was invoked 1s after the previous send") {
+		t.Fatalf("expected rapid-send warning, got %q", got)
+	}
+
+	info, err := os.Stat(filepath.Join(dir, lastSendAttemptFile))
+	if err != nil {
+		t.Fatalf("stat marker: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("marker mode = %04o, want 0600", got)
+	}
+}
+
+func TestWarnRapidSendIfNeededSkipsOldOrInvalidMarker(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	path := filepath.Join(dir, lastSendAttemptFile)
+
+	if err := os.WriteFile(path, []byte(now.Add(-rapidSendWarningThreshold).Format(time.RFC3339Nano)), 0o600); err != nil {
+		t.Fatalf("write old marker: %v", err)
+	}
+	var stderr bytes.Buffer
+	if err := warnRapidSendIfNeeded(dir, now, &stderr); err != nil {
+		t.Fatalf("old marker warning check: %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("old marker warned: %q", stderr.String())
+	}
+
+	if err := os.WriteFile(path, []byte("not a timestamp"), 0o600); err != nil {
+		t.Fatalf("write invalid marker: %v", err)
+	}
+	if err := warnRapidSendIfNeeded(dir, now.Add(time.Second), &stderr); err != nil {
+		t.Fatalf("invalid marker warning check: %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("invalid marker warned: %q", stderr.String())
 	}
 }

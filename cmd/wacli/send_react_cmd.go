@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steipete/wacli/internal/out"
@@ -47,6 +48,9 @@ func newSendReactCmd(flags *rootFlags) *cobra.Command {
 
 			chat, senderJID, err := reactionTarget(to, sender)
 			if err != nil {
+				return err
+			}
+			if err := warnRapidSendIfNeeded(a.StoreDir(), time.Now().UTC(), os.Stderr); err != nil {
 				return err
 			}
 			sentID, err := runSendOperation(ctx, reconnectForSend(a), func(ctx context.Context) (types.MessageID, error) {

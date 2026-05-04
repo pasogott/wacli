@@ -35,6 +35,8 @@
 - Send: bound send attempts and reconnect once for stale-session/time-out failures instead of hanging indefinitely. (#115 — thanks @0xatrilla)
 - Send: persist retry-message plaintext so linked devices can decrypt retried messages. (#186 — thanks @SimDamDev)
 - Store: use the XDG state directory on Linux by default, while keeping existing `~/.wacli` stores working. (#172, #164 — thanks @txhno)
+- Sync: guard lazy WhatsApp client initialization against concurrent `OpenWA` calls. (#62 — thanks @thakoreh)
+- Sync: warn when encrypted reaction messages cannot be decrypted instead of dropping the failure silently. (#192 — thanks @matrixise and @dinakars777)
 - Sync: keep `sync --once` idle timing focused on message/history events so connection chatter cannot hang exit. (#119 — thanks @jyothepro)
 - Sync: start `sync --once` idle timing after the `Connected` event. (#171 — thanks @fuleinist)
 - Sync: include event type, stack trace, and recovery count when logging recovered event-handler panics. (#181 — thanks @shaun0927)

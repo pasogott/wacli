@@ -24,7 +24,7 @@ wacli auth
 
 `auth` prints a QR code in your terminal. On your phone, open WhatsApp → **Linked devices** → **Link a device**, scan the QR, and approve. As soon as pairing succeeds, `auth` immediately starts the initial sync — keep it running until it idles out or press `Ctrl+C` once it has caught up.
 
-If the QR does not scan, try `--qr-format text` (numeric fallback) or pair via phone-number code with `--phone +15551234567`.
+If the terminal QR does not scan, try `--qr-format text` and render that raw QR payload in another app, or pair via phone-number code with `--phone +15551234567`.
 
 > Refresh tokens last as long as the linked device stays linked on your phone. Unlinking from the phone (or `wacli auth logout`) ends the session and requires a fresh QR.
 

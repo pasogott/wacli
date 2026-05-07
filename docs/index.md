@@ -33,7 +33,7 @@ A script-friendly WhatsApp CLI built on [`whatsmeow`](https://github.com/tulir/w
 
 ## Status
 
-Core implementation is in place. The [CHANGELOG](https://github.com/steipete/wacli/blob/main/CHANGELOG.md) tracks shipped behavior. WhatsApp Web is not a published API; expect occasional breakage from upstream protocol changes — `wacli` follows `whatsmeow` upstream.
+Core implementation is in place. The [CHANGELOG](https://github.com/openclaw/wacli/blob/main/CHANGELOG.md) tracks shipped behavior. WhatsApp Web is not a published API; expect occasional breakage from upstream protocol changes — `wacli` follows `whatsmeow` upstream.
 
 ## Out of scope
 
@@ -45,4 +45,4 @@ Core implementation is in place. The [CHANGELOG](https://github.com/steipete/wac
 
 `wacli` is a third-party tool that uses the WhatsApp Web protocol via `whatsmeow`. It is **not affiliated with WhatsApp or Meta**. Use at your own risk; pairing as a linked device is subject to WhatsApp's terms.
 
-Released under the [MIT license](https://github.com/steipete/wacli/blob/main/LICENSE).
+Released under the [MIT license](https://github.com/openclaw/wacli/blob/main/LICENSE).

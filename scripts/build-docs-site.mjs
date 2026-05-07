@@ -8,7 +8,7 @@ import { escapeAttr, escapeHtml, markdownToHtml, tocFromHtml, validateLinks } fr
 const root = process.cwd();
 const docsDir = path.join(root, "docs");
 const outDir = path.join(root, "dist", "docs-site");
-const repoBase = "https://github.com/steipete/wacli";
+const repoBase = "https://github.com/openclaw/wacli";
 const repoEditBase = `${repoBase}/edit/main/docs`;
 const cname = readCname();
 const siteBase = cname ? `https://${cname}` : "";

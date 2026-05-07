@@ -23,7 +23,7 @@ brew reinstall steipete/tap/wacli
 
 ## GitHub releases (raw binaries)
 
-Download the matching archive from the [latest release](https://github.com/steipete/wacli/releases) and put `wacli` (or `wacli.exe` on Windows) on your `PATH`.
+Download the matching archive from the [latest release](https://github.com/openclaw/wacli/releases) and put `wacli` (or `wacli.exe` on Windows) on your `PATH`.
 
 ## Build from source
 
@@ -36,7 +36,7 @@ Download the matching archive from the [latest release](https://github.com/steip
 Then:
 
 ```bash
-git clone https://github.com/steipete/wacli.git
+git clone https://github.com/openclaw/wacli.git
 cd wacli
 CGO_ENABLED=1 CGO_CFLAGS="-Wno-error=missing-braces" \
   go build -tags sqlite_fts5 -o ./dist/wacli ./cmd/wacli

@@ -4,11 +4,21 @@
 
 ### Changed
 
+- Module: migrate the canonical Go module/import path to `github.com/openclaw/wacli`. (#217 - thanks @dinakars777)
 - Sync: collapse routine interactive TTY progress into a single updating status line while keeping warnings visible as normal stderr lines.
+
+### Chore
+
+- CI: make the Homebrew tap handoff use `openclaw/wacli` and skip gracefully when the tap token is missing. (#216 - thanks @dinakars777)
+- Maintainers: remove the stale personal CODEOWNERS rule after the OpenClaw move. (#218 - thanks @dinakars777)
 
 ### Fixed
 
+- CLI: truncate table output by rune so emoji and other non-ASCII text stay valid UTF-8. (#222 - thanks @dinakars777)
+- History: apply coverage/actionable filters before `LIMIT` so newer blocked chats do not hide ready chats. (#219 - thanks @dinakars777)
 - Messages: extract display/search text from shared WhatsApp contact cards, including vCard phone numbers. (#214)
+- Send: route whatsmeow diagnostics to stderr and clarify that `sent: true` means WhatsApp accepted the send request. (#215 - thanks @dinakars777)
+- Sync: let explicit `--max-messages=0` override `WACLI_SYNC_MAX_MESSAGES`. (#220 - thanks @dinakars777)
 
 ## 0.8.0 - 2026-05-07
 

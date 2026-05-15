@@ -16,7 +16,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.9.0"
+var version = "0.9.1"
 
 const docsURL = "https://wacli.sh"
 

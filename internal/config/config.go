@@ -60,7 +60,7 @@ func DefaultBaseDir() string {
 	xdgStateHome := os.Getenv("XDG_STATE_HOME")
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		if runtime.GOOS == "linux" && xdgStateHome != "" {
+		if runtime.GOOS == "linux" && xdgStateHome != "" && filepath.IsAbs(xdgStateHome) {
 			return filepath.Join(xdgStateHome, "wacli")
 		}
 		return ".wacli"
@@ -103,26 +103,33 @@ func LoadAccountsConfig(path string) (*AccountsConfig, error) {
 	if cfg.Accounts == nil {
 		cfg.Accounts = map[string]AccountEntry{}
 	}
+	if err := validateAccountsConfig(&cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+func validateAccountsConfig(cfg *AccountsConfig) error {
 	for name, entry := range cfg.Accounts {
 		if err := ValidateAccountName(name); err != nil {
-			return nil, err
+			return err
 		}
 		if strings.TrimSpace(entry.Store) == "" {
-			return nil, fmt.Errorf("account %q store is required", name)
+			return fmt.Errorf("account %q store is required", name)
 		}
 		if strings.ContainsAny(entry.Store, "?#") {
-			return nil, fmt.Errorf("account %q store must not contain '?' or '#'", name)
+			return fmt.Errorf("account %q store must not contain '?' or '#'", name)
 		}
 	}
 	if cfg.DefaultAccount != "" {
 		if err := ValidateAccountName(cfg.DefaultAccount); err != nil {
-			return nil, fmt.Errorf("default_account: %w", err)
+			return fmt.Errorf("default_account: %w", err)
 		}
 		if _, ok := cfg.Accounts[cfg.DefaultAccount]; !ok {
-			return nil, fmt.Errorf("default_account %q is not defined", cfg.DefaultAccount)
+			return fmt.Errorf("default_account %q is not defined", cfg.DefaultAccount)
 		}
 	}
-	return &cfg, nil
+	return nil
 }
 
 func LoadAccountsConfigIfExists(path string) (*AccountsConfig, bool, error) {
@@ -142,6 +149,9 @@ func SaveAccountsConfig(path string, cfg *AccountsConfig) error {
 	}
 	if cfg.Accounts == nil {
 		cfg.Accounts = map[string]AccountEntry{}
+	}
+	if err := validateAccountsConfig(cfg); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
@@ -220,7 +230,7 @@ func defaultStoreDirFor(goos, home, xdgStateHome string, exists func(string) boo
 	if goos != "linux" {
 		return legacy
 	}
-	if xdgStateHome != "" {
+	if xdgStateHome != "" && filepath.IsAbs(xdgStateHome) {
 		return filepath.Join(xdgStateHome, "wacli")
 	}
 	xdgDefault := filepath.Join(home, ".local", "state", "wacli")

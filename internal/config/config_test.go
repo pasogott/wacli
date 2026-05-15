@@ -54,6 +54,14 @@ func TestDefaultStoreDirFor(t *testing.T) {
 		}
 	})
 
+	t.Run("ignores relative XDG_STATE_HOME on linux", func(t *testing.T) {
+		got := defaultStoreDirFor("linux", "/home/alice", "state", func(string) bool { return false })
+		want := filepath.Join("/home/alice", ".local", "state", "wacli")
+		if got != want {
+			t.Fatalf("defaultStoreDirFor = %q, want %q", got, want)
+		}
+	})
+
 	t.Run("keeps existing legacy linux store", func(t *testing.T) {
 		got := defaultStoreDirFor("linux", "/home/alice", "", func(path string) bool {
 			return path == filepath.Join("/home/alice", ".wacli")
@@ -123,6 +131,55 @@ func TestAccountsConfigKnownFields(t *testing.T) {
 	_, err := LoadAccountsConfig(path)
 	if err == nil || !strings.Contains(err.Error(), "field unknown not found") {
 		t.Fatalf("LoadAccountsConfig error = %v, want unknown field error", err)
+	}
+}
+
+func TestSaveAccountsConfigRejectsInvalidConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  *AccountsConfig
+		want string
+	}{
+		{
+			name: "bad account name",
+			cfg: &AccountsConfig{Accounts: map[string]AccountEntry{
+				"bad/name": {Store: "accounts/bad"},
+			}},
+			want: "invalid account name",
+		},
+		{
+			name: "missing store",
+			cfg: &AccountsConfig{Accounts: map[string]AccountEntry{
+				"bad": {Store: " "},
+			}},
+			want: "store is required",
+		},
+		{
+			name: "uri metacharacter",
+			cfg: &AccountsConfig{Accounts: map[string]AccountEntry{
+				"bad": {Store: "accounts/bad?mode=memory"},
+			}},
+			want: "must not contain '?' or '#'",
+		},
+		{
+			name: "undefined default",
+			cfg: &AccountsConfig{
+				DefaultAccount: "missing",
+				Accounts:       map[string]AccountEntry{"work": {Store: "accounts/work"}},
+			},
+			want: "default_account \"missing\" is not defined",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			err := SaveAccountsConfig(path, tc.cfg)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("SaveAccountsConfig error = %v, want %q", err, tc.want)
+			}
+			if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+				t.Fatalf("config file exists after failed save: %v", statErr)
+			}
+		})
 	}
 }
 

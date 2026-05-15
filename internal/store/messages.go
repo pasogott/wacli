@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/openclaw/wacli/internal/store/storedb"
 )
 
 type UpsertMessageParams struct {
@@ -115,29 +117,15 @@ func (d *DB) UpsertMessage(p UpsertMessageParams) error {
 }
 
 func (d *DB) MarkMessageRevoked(chatJID, msgID string) error {
-	res, err := d.sql.Exec(`
-		UPDATE messages
-		SET revoked = 1,
-		    text = NULL,
-		    display_text = ?,
-		    buttons = NULL,
-		    media_type = NULL,
-		    media_caption = NULL,
-		    filename = NULL,
-		    mime_type = NULL,
-		    direct_path = NULL,
-		    media_key = NULL,
-		    file_sha256 = NULL,
-		    file_enc_sha256 = NULL,
-		    file_length = NULL,
-		    local_path = NULL,
-		    downloaded_at = NULL
-		WHERE chat_jid = ? AND msg_id = ?
-	`, DeletedMessageDisplayText, strings.TrimSpace(chatJID), strings.TrimSpace(msgID))
+	n, err := d.q.MarkMessageRevoked(storeCtx(), storedb.MarkMessageRevokedParams{
+		DisplayText: sql.NullString{String: DeletedMessageDisplayText, Valid: true},
+		ChatJid:     strings.TrimSpace(chatJID),
+		MsgID:       strings.TrimSpace(msgID),
+	})
 	if err != nil {
 		return err
 	}
-	if n, err := res.RowsAffected(); err == nil && n == 0 {
+	if n == 0 {
 		return sql.ErrNoRows
 	}
 	return nil
@@ -155,30 +143,16 @@ func (d *DB) MarkMessageDeletedForMe(chatJID, msgID, senderJID string, fromMe bo
 	if deletedAt.IsZero() {
 		deletedAt = nowUTC()
 	}
-	res, err := d.sql.Exec(`
-		UPDATE messages
-		SET deleted_for_me = 1,
-		    text = NULL,
-		    display_text = ?,
-		    buttons = NULL,
-		    media_type = NULL,
-		    media_caption = NULL,
-		    filename = NULL,
-		    mime_type = NULL,
-		    direct_path = NULL,
-		    media_key = NULL,
-		    file_sha256 = NULL,
-		    file_enc_sha256 = NULL,
-		    file_length = NULL,
-		    local_path = NULL,
-		    downloaded_at = NULL
-		WHERE chat_jid = ? AND msg_id = ?
-	`, DeletedForMeMessageDisplayText, chatJID, msgID)
+	n, err := d.q.MarkMessageDeletedForMe(storeCtx(), storedb.MarkMessageDeletedForMeParams{
+		DisplayText: sql.NullString{String: DeletedForMeMessageDisplayText, Valid: true},
+		ChatJid:     chatJID,
+		MsgID:       msgID,
+	})
 	if err != nil {
 		return err
 	}
-	if n, err := res.RowsAffected(); err != nil || n > 0 {
-		return err
+	if n > 0 {
+		return nil
 	}
 	return d.UpsertMessage(UpsertMessageParams{
 		ChatJID:      chatJID,
@@ -191,30 +165,16 @@ func (d *DB) MarkMessageDeletedForMe(chatJID, msgID, senderJID string, fromMe bo
 }
 
 func (d *DB) UpdateMessageText(chatJID, msgID, text string) error {
-	res, err := d.sql.Exec(`
-		UPDATE messages
-		SET text = ?,
-		    display_text = ?,
-		    buttons = NULL,
-		    media_type = NULL,
-		    media_caption = NULL,
-		    filename = NULL,
-		    mime_type = NULL,
-		    direct_path = NULL,
-		    media_key = NULL,
-		    file_sha256 = NULL,
-		    file_enc_sha256 = NULL,
-		    file_length = NULL,
-		    local_path = NULL,
-		    downloaded_at = NULL,
-		    revoked = 0,
-		    deleted_for_me = 0
-		WHERE chat_jid = ? AND msg_id = ?
-	`, nullIfEmpty(text), nullIfEmpty(text), strings.TrimSpace(chatJID), strings.TrimSpace(msgID))
+	n, err := d.q.UpdateMessageText(storeCtx(), storedb.UpdateMessageTextParams{
+		Text:        nullString(text),
+		DisplayText: nullString(text),
+		ChatJid:     strings.TrimSpace(chatJID),
+		MsgID:       strings.TrimSpace(msgID),
+	})
 	if err != nil {
 		return err
 	}
-	if n, err := res.RowsAffected(); err == nil && n == 0 {
+	if n == 0 {
 		return sql.ErrNoRows
 	}
 	return nil
@@ -312,49 +272,15 @@ func uniqueNonEmptyStrings(values []string) []string {
 }
 
 func (d *DB) GetMessage(chatJID, msgID string) (Message, error) {
-	row := d.sql.QueryRow(`
-		SELECT `+messageSelectColumns("")+`
-		FROM messages m
-		LEFT JOIN chats c ON c.jid = m.chat_jid
-		LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
-		WHERE m.chat_jid = ? AND m.msg_id = ?
-	`, chatJID, msgID)
-	var m Message
-	var ts int64
-	var fromMe int
-	var forwarded int
-	var forwardingScore int64
-	var downloadedAt int64
-	var starred int
-	var starredAt int64
-	var revoked int
-	var deletedForMe int
-	var buttonsJSON string
-	if err := row.Scan(&m.rowID, &m.ChatJID, &m.ChatName, &m.MsgID, &m.SenderJID, &m.SenderName, &ts, &fromMe, &m.Text, &m.DisplayText, &forwarded, &forwardingScore, &m.ReactionToID, &m.ReactionEmoji, &m.MediaType, &m.MediaCaption, &m.Filename, &m.MimeType, &m.DirectPath, &m.LocalPath, &downloadedAt, &starred, &starredAt, &revoked, &deletedForMe, &buttonsJSON, &m.Snippet); err != nil {
+	row, err := d.q.GetMessage(storeCtx(), storedb.GetMessageParams{ChatJid: chatJID, MsgID: msgID})
+	if err != nil {
 		return Message{}, err
 	}
-	m.Timestamp = fromUnix(ts)
-	m.FromMe = fromMe != 0
-	m.IsForwarded = forwarded != 0
-	m.ForwardingScore = uint32(forwardingScore)
-	m.DownloadedAt = fromUnix(downloadedAt)
-	m.Starred = starred != 0
-	m.StarredAt = fromUnix(starredAt)
-	m.Revoked = revoked != 0
-	m.DeletedForMe = deletedForMe != 0
-	if buttonsJSON != "" {
-		_ = json.Unmarshal([]byte(buttonsJSON), &m.Buttons)
-	}
-	return m, nil
+	return messageFromGetRow(row), nil
 }
 
 func (d *DB) CountMessages() (int64, error) {
-	row := d.sql.QueryRow(`SELECT COUNT(1) FROM messages`)
-	var n int64
-	if err := row.Scan(&n); err != nil {
-		return 0, err
-	}
-	return n, nil
+	return d.q.CountMessages(storeCtx())
 }
 
 func (d *DB) GetOldestMessageInfo(chatJID string) (MessageInfo, error) {
@@ -362,22 +288,11 @@ func (d *DB) GetOldestMessageInfo(chatJID string) (MessageInfo, error) {
 	if chatJID == "" {
 		return MessageInfo{}, fmt.Errorf("chat JID is required")
 	}
-	row := d.sql.QueryRow(`
-		SELECT m.chat_jid, m.msg_id, m.ts, m.from_me, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,'')
-		FROM messages m
-		WHERE m.chat_jid = ?
-		ORDER BY m.ts ASC, m.rowid ASC
-		LIMIT 1
-	`, chatJID)
-	var out MessageInfo
-	var ts int64
-	var fromMe int
-	if err := row.Scan(&out.ChatJID, &out.MsgID, &ts, &fromMe, &out.SenderJID, &out.SenderName); err != nil {
+	row, err := d.q.GetOldestMessageInfo(storeCtx(), chatJID)
+	if err != nil {
 		return MessageInfo{}, err
 	}
-	out.Timestamp = fromUnix(ts)
-	out.FromMe = fromMe != 0
-	return out, nil
+	return messageInfoFromOldestRow(row), nil
 }
 
 func (d *DB) GetLatestMessageInfo(chatJID string) (MessageInfo, error) {
@@ -385,22 +300,11 @@ func (d *DB) GetLatestMessageInfo(chatJID string) (MessageInfo, error) {
 	if chatJID == "" {
 		return MessageInfo{}, fmt.Errorf("chat JID is required")
 	}
-	row := d.sql.QueryRow(`
-		SELECT m.chat_jid, m.msg_id, m.ts, m.from_me, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,'')
-		FROM messages m
-		WHERE m.chat_jid = ?
-		ORDER BY m.ts DESC, m.rowid DESC
-		LIMIT 1
-	`, chatJID)
-	var out MessageInfo
-	var ts int64
-	var fromMe int
-	if err := row.Scan(&out.ChatJID, &out.MsgID, &ts, &fromMe, &out.SenderJID, &out.SenderName); err != nil {
+	row, err := d.q.GetLatestMessageInfo(storeCtx(), chatJID)
+	if err != nil {
 		return MessageInfo{}, err
 	}
-	out.Timestamp = fromUnix(ts)
-	out.FromMe = fromMe != 0
-	return out, nil
+	return messageInfoFromLatestRow(row), nil
 }
 
 func (d *DB) MessageContext(chatJID, msgID string, before, after int) ([]Message, error) {
@@ -415,41 +319,45 @@ func (d *DB) MessageContext(chatJID, msgID string, before, after int) ([]Message
 		return nil, err
 	}
 
-	beforeRows, err := d.scanMessages(`
-			SELECT `+messageSelectColumns("")+`
-		FROM messages m
-		LEFT JOIN chats c ON c.jid = m.chat_jid
-		LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
-		WHERE m.chat_jid = ? AND m.revoked = 0 AND m.deleted_for_me = 0 AND (m.ts < ? OR (m.ts = ? AND m.rowid < ?))
-		ORDER BY m.ts DESC, m.rowid DESC
-		LIMIT ?
-	`, chatJID, unix(target.Timestamp), unix(target.Timestamp), target.rowID, before)
+	beforeRows, err := d.q.MessageContextBefore(storeCtx(), storedb.MessageContextBeforeParams{
+		ChatJid: chatJID,
+		Ts:      unix(target.Timestamp),
+		Ts_2:    unix(target.Timestamp),
+		Rowid:   target.rowID,
+		Limit:   int64(before),
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	afterRows, err := d.scanMessages(`
-			SELECT `+messageSelectColumns("")+`
-		FROM messages m
-		LEFT JOIN chats c ON c.jid = m.chat_jid
-		LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
-		WHERE m.chat_jid = ? AND m.revoked = 0 AND m.deleted_for_me = 0 AND (m.ts > ? OR (m.ts = ? AND m.rowid > ?))
-		ORDER BY m.ts ASC, m.rowid ASC
-		LIMIT ?
-	`, chatJID, unix(target.Timestamp), unix(target.Timestamp), target.rowID, after)
+	afterRows, err := d.q.MessageContextAfter(storeCtx(), storedb.MessageContextAfterParams{
+		ChatJid: chatJID,
+		Ts:      unix(target.Timestamp),
+		Ts_2:    unix(target.Timestamp),
+		Rowid:   target.rowID,
+		Limit:   int64(after),
+	})
 	if err != nil {
 		return nil, err
+	}
+	beforeMessages := make([]Message, 0, len(beforeRows))
+	for _, row := range beforeRows {
+		beforeMessages = append(beforeMessages, messageFromBeforeRow(row))
+	}
+	afterMessages := make([]Message, 0, len(afterRows))
+	for _, row := range afterRows {
+		afterMessages = append(afterMessages, messageFromAfterRow(row))
 	}
 
 	// Reverse before rows back to chronological order.
-	for i, j := 0, len(beforeRows)-1; i < j; i, j = i+1, j-1 {
-		beforeRows[i], beforeRows[j] = beforeRows[j], beforeRows[i]
+	for i, j := 0, len(beforeMessages)-1; i < j; i, j = i+1, j-1 {
+		beforeMessages[i], beforeMessages[j] = beforeMessages[j], beforeMessages[i]
 	}
 
-	out := make([]Message, 0, len(beforeRows)+1+len(afterRows))
-	out = append(out, beforeRows...)
+	out := make([]Message, 0, len(beforeMessages)+1+len(afterMessages))
+	out = append(out, beforeMessages...)
 	out = append(out, target)
-	out = append(out, afterRows...)
+	out = append(out, afterMessages...)
 	return out, nil
 }
 
@@ -491,4 +399,94 @@ func (d *DB) scanMessages(query string, args ...interface{}) ([]Message, error) 
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+func messageFromGetRow(row storedb.GetMessageRow) Message {
+	return messageFromScalars(
+		row.Rowid, row.ChatJid, row.Name, row.MsgID, row.SenderJid, row.SenderName,
+		row.Ts, row.FromMe, row.Text, row.DisplayText, row.IsForwarded,
+		row.ForwardingScore, row.ReactionToID, row.ReactionEmoji, row.MediaType,
+		row.MediaCaption, row.Filename, row.MimeType, row.DirectPath, row.LocalPath,
+		row.DownloadedAt, row.Column22, row.StarredAt, row.Revoked, row.DeletedForMe,
+		row.Buttons, row.Column27,
+	)
+}
+
+func messageFromBeforeRow(row storedb.MessageContextBeforeRow) Message {
+	return messageFromScalars(
+		row.Rowid, row.ChatJid, row.Name, row.MsgID, row.SenderJid, row.SenderName,
+		row.Ts, row.FromMe, row.Text, row.DisplayText, row.IsForwarded,
+		row.ForwardingScore, row.ReactionToID, row.ReactionEmoji, row.MediaType,
+		row.MediaCaption, row.Filename, row.MimeType, row.DirectPath, row.LocalPath,
+		row.DownloadedAt, row.Column22, row.StarredAt, row.Revoked, row.DeletedForMe,
+		row.Buttons, row.Column27,
+	)
+}
+
+func messageFromAfterRow(row storedb.MessageContextAfterRow) Message {
+	return messageFromScalars(
+		row.Rowid, row.ChatJid, row.Name, row.MsgID, row.SenderJid, row.SenderName,
+		row.Ts, row.FromMe, row.Text, row.DisplayText, row.IsForwarded,
+		row.ForwardingScore, row.ReactionToID, row.ReactionEmoji, row.MediaType,
+		row.MediaCaption, row.Filename, row.MimeType, row.DirectPath, row.LocalPath,
+		row.DownloadedAt, row.Column22, row.StarredAt, row.Revoked, row.DeletedForMe,
+		row.Buttons, row.Column27,
+	)
+}
+
+func messageFromScalars(rowID int64, chatJID, chatName, msgID, senderJID, senderName string, ts, fromMe int64, text, displayText string, forwarded, forwardingScore int64, reactionToID, reactionEmoji, mediaType, mediaCaption, filename, mimeType, directPath, localPath string, downloadedAt, starred, starredAt, revoked, deletedForMe int64, buttonsJSON, snippet string) Message {
+	m := Message{
+		rowID:           rowID,
+		ChatJID:         chatJID,
+		ChatName:        chatName,
+		MsgID:           msgID,
+		SenderJID:       senderJID,
+		SenderName:      senderName,
+		Timestamp:       fromUnix(ts),
+		FromMe:          fromMe != 0,
+		Text:            text,
+		DisplayText:     displayText,
+		IsForwarded:     forwarded != 0,
+		ForwardingScore: uint32(forwardingScore),
+		ReactionToID:    reactionToID,
+		ReactionEmoji:   reactionEmoji,
+		MediaType:       mediaType,
+		MediaCaption:    mediaCaption,
+		Filename:        filename,
+		MimeType:        mimeType,
+		DirectPath:      directPath,
+		LocalPath:       localPath,
+		DownloadedAt:    fromUnix(downloadedAt),
+		Starred:         starred != 0,
+		StarredAt:       fromUnix(starredAt),
+		Revoked:         revoked != 0,
+		DeletedForMe:    deletedForMe != 0,
+		Snippet:         snippet,
+	}
+	if buttonsJSON != "" {
+		_ = json.Unmarshal([]byte(buttonsJSON), &m.Buttons)
+	}
+	return m
+}
+
+func messageInfoFromOldestRow(row storedb.GetOldestMessageInfoRow) MessageInfo {
+	return MessageInfo{
+		ChatJID:    row.ChatJid,
+		MsgID:      row.MsgID,
+		Timestamp:  fromUnix(row.Ts),
+		FromMe:     row.FromMe != 0,
+		SenderJID:  row.SenderJid,
+		SenderName: row.SenderName,
+	}
+}
+
+func messageInfoFromLatestRow(row storedb.GetLatestMessageInfoRow) MessageInfo {
+	return MessageInfo{
+		ChatJID:    row.ChatJid,
+		MsgID:      row.MsgID,
+		Timestamp:  fromUnix(row.Ts),
+		FromMe:     row.FromMe != 0,
+		SenderJID:  row.SenderJid,
+		SenderName: row.SenderName,
+	}
 }

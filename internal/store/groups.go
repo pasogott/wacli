@@ -1,82 +1,64 @@
 package store
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/openclaw/wacli/internal/store/storedb"
 )
 
 func (d *DB) UpsertGroup(jid, name, ownerJID string, created time.Time) error {
-	now := nowUTC().Unix()
-	_, err := d.sql.Exec(`
-		INSERT INTO groups(jid, name, owner_jid, created_ts, left_at, updated_at)
-		VALUES (?, ?, ?, ?, NULL, ?)
-		ON CONFLICT(jid) DO UPDATE SET
-			name=COALESCE(NULLIF(excluded.name,''), groups.name),
-			owner_jid=COALESCE(NULLIF(excluded.owner_jid,''), groups.owner_jid),
-			created_ts=COALESCE(NULLIF(excluded.created_ts,0), groups.created_ts),
-			left_at=NULL,
-			updated_at=excluded.updated_at
-	`, jid, name, ownerJID, unix(created), now)
-	return err
+	return d.q.UpsertGroup(storeCtx(), storedb.UpsertGroupParams{
+		Jid:       jid,
+		Name:      nullString(name),
+		OwnerJid:  nullString(ownerJID),
+		CreatedTs: sqlNullInt64(unix(created)),
+		UpdatedAt: nowUTC().Unix(),
+	})
 }
 
 func (d *DB) UpsertGroupWithHierarchy(jid, name, ownerJID string, created time.Time, isParent bool, linkedParentJID string) error {
-	now := nowUTC().Unix()
 	linkedParentJID = strings.TrimSpace(linkedParentJID)
 	if isParent {
 		linkedParentJID = ""
 	}
-	_, err := d.sql.Exec(`
-		INSERT INTO groups(jid, name, owner_jid, created_ts, is_parent, linked_parent_jid, left_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, NULL, ?)
-		ON CONFLICT(jid) DO UPDATE SET
-			name=COALESCE(NULLIF(excluded.name,''), groups.name),
-			owner_jid=COALESCE(NULLIF(excluded.owner_jid,''), groups.owner_jid),
-			created_ts=COALESCE(NULLIF(excluded.created_ts,0), groups.created_ts),
-			is_parent=excluded.is_parent,
-			linked_parent_jid=excluded.linked_parent_jid,
-			left_at=NULL,
-			updated_at=excluded.updated_at
-	`, jid, name, ownerJID, unix(created), boolToInt(isParent), nullIfEmpty(linkedParentJID), now)
-	return err
+	return d.q.UpsertGroupWithHierarchy(storeCtx(), storedb.UpsertGroupWithHierarchyParams{
+		Jid:             jid,
+		Name:            nullString(name),
+		OwnerJid:        nullString(ownerJID),
+		CreatedTs:       sqlNullInt64(unix(created)),
+		IsParent:        boolToInt64(isParent),
+		LinkedParentJid: nullString(linkedParentJID),
+		UpdatedAt:       nowUTC().Unix(),
+	})
 }
 
 func (d *DB) MarkGroupLeft(jid string, leftAt time.Time) error {
-	now := nowUTC().Unix()
 	if leftAt.IsZero() {
 		leftAt = nowUTC()
 	}
-	_, err := d.sql.Exec(`
-		UPDATE groups
-		SET left_at = ?, updated_at = ?
-		WHERE jid = ?
-	`, unix(leftAt), now, jid)
-	return err
+	return d.q.MarkGroupLeft(storeCtx(), storedb.MarkGroupLeftParams{
+		LeftAt:    sqlNullInt64(unix(leftAt)),
+		UpdatedAt: nowUTC().Unix(),
+		Jid:       jid,
+	})
 }
 
 func (d *DB) MarkGroupsMissingFrom(joined map[string]bool, leftAt time.Time) error {
 	if leftAt.IsZero() {
 		leftAt = nowUTC()
 	}
-	rows, err := d.sql.Query(`SELECT jid FROM groups WHERE left_at IS NULL`)
+	joinedJIDs, err := d.q.ListJoinedGroupJIDs(storeCtx())
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-
 	var missing []string
-	for rows.Next() {
-		var jid string
-		if err := rows.Scan(&jid); err != nil {
-			return err
-		}
+	for _, jid := range joinedJIDs {
 		if !joined[jid] {
 			missing = append(missing, jid)
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
 	}
 	for _, jid := range missing {
 		if err := d.MarkGroupLeft(jid, leftAt); err != nil {
@@ -97,22 +79,23 @@ func (d *DB) ReplaceGroupParticipants(groupJID string, participants []GroupParti
 		}
 	}()
 
-	if _, err = tx.Exec(`DELETE FROM group_participants WHERE group_jid = ?`, groupJID); err != nil {
+	q := d.q.WithTx(tx)
+	ctx := storeCtx()
+	if err = q.DeleteGroupParticipants(ctx, groupJID); err != nil {
 		return err
 	}
-	stmt, err := tx.Prepare(`INSERT INTO group_participants(group_jid, user_jid, role, updated_at) VALUES(?, ?, ?, ?)`)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
 	now := nowUTC()
 	for _, participant := range participants {
 		role := strings.TrimSpace(participant.Role)
 		if role == "" {
 			role = "member"
 		}
-		if _, err = stmt.Exec(groupJID, participant.UserJID, role, unix(now)); err != nil {
+		if err = q.InsertGroupParticipant(ctx, storedb.InsertGroupParticipantParams{
+			GroupJid:  groupJID,
+			UserJid:   participant.UserJID,
+			Role:      sql.NullString{String: role, Valid: true},
+			UpdatedAt: unix(now),
+		}); err != nil {
 			return err
 		}
 	}
@@ -161,8 +144,7 @@ func (d *DB) DeleteGroup(jid string) error {
 	if jid == "" {
 		return fmt.Errorf("group JID is required")
 	}
-	_, err := d.sql.Exec(`DELETE FROM groups WHERE jid = ?`, jid)
-	return err
+	return d.q.DeleteGroup(storeCtx(), jid)
 }
 
 func (d *DB) DeleteGroupLocalData(jid string) (err error) {
@@ -179,48 +161,33 @@ func (d *DB) DeleteGroupLocalData(jid string) (err error) {
 			_ = tx.Rollback()
 		}
 	}()
-	if _, err = tx.Exec(`DELETE FROM groups WHERE jid = ?`, jid); err != nil {
+	q := d.q.WithTx(tx)
+	ctx := storeCtx()
+	if err = q.DeleteGroup(ctx, jid); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(`DELETE FROM poll_votes WHERE chat_jid = ?`, jid); err != nil {
+	if err = q.DeletePollVotesForChat(ctx, jid); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(`DELETE FROM polls WHERE chat_jid = ?`, jid); err != nil {
+	if err = q.DeletePollsForChat(ctx, jid); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(`DELETE FROM chats WHERE jid = ?`, jid); err != nil {
+	if err = q.DeleteChat(ctx, jid); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
 func (d *DB) ListLeftGroups() ([]Group, error) {
-	rows, err := d.sql.Query(`
-		SELECT jid, COALESCE(name,''), COALESCE(owner_jid,''), is_parent, COALESCE(linked_parent_jid,''), COALESCE(created_ts,0), COALESCE(left_at,0), updated_at
-		FROM groups
-		WHERE left_at IS NOT NULL
-		ORDER BY left_at DESC
-	`)
+	rows, err := d.q.ListLeftGroups(storeCtx())
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var out []Group
-	for rows.Next() {
-		var g Group
-		var isParent int
-		var created, left, updated int64
-		if err := rows.Scan(&g.JID, &g.Name, &g.OwnerJID, &isParent, &g.LinkedParentJID, &created, &left, &updated); err != nil {
-			return nil, err
-		}
-		g.IsParent = isParent != 0
-		g.CreatedAt = fromUnix(created)
-		g.LeftAt = fromUnix(left)
-		g.UpdatedAt = fromUnix(updated)
-		out = append(out, g)
+	out := make([]Group, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, groupFromLeftRow(row))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (d *DB) ListPrunableGroups(days int, includeActive bool) ([]Group, error) {
@@ -283,11 +250,7 @@ func (d *DB) ListPrunableGroups(days int, includeActive bool) ([]Group, error) {
 }
 
 func (d *DB) DeleteLeftGroups() (int64, error) {
-	res, err := d.sql.Exec(`DELETE FROM groups WHERE left_at IS NOT NULL`)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
+	return d.q.DeleteLeftGroups(storeCtx())
 }
 
 func (d *DB) DeleteLeftGroupsOlderThan(days int) (int64, error) {
@@ -295,9 +258,18 @@ func (d *DB) DeleteLeftGroupsOlderThan(days int) (int64, error) {
 		return 0, fmt.Errorf("days must be positive")
 	}
 	cutoff := nowUTC().AddDate(0, 0, -days)
-	res, err := d.sql.Exec(`DELETE FROM groups WHERE left_at IS NOT NULL AND left_at < ?`, unix(cutoff))
-	if err != nil {
-		return 0, err
+	return d.q.DeleteLeftGroupsOlderThan(storeCtx(), sqlNullInt64(unix(cutoff)))
+}
+
+func groupFromLeftRow(row storedb.ListLeftGroupsRow) Group {
+	return Group{
+		JID:             row.Jid,
+		Name:            row.Name,
+		OwnerJID:        row.OwnerJid,
+		IsParent:        row.IsParent != 0,
+		LinkedParentJID: row.LinkedParentJid,
+		CreatedAt:       fromUnix(row.CreatedTs),
+		LeftAt:          fromUnix(row.LeftAt),
+		UpdatedAt:       fromUnix(row.UpdatedAt),
 	}
-	return res.RowsAffected()
 }

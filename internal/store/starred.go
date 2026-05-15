@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/openclaw/wacli/internal/store/storedb"
 )
 
 type SetStarredParams struct {
@@ -34,22 +36,19 @@ func (d *DB) SetStarred(p SetStarredParams) error {
 		return fmt.Errorf("message ID is required")
 	}
 	if !p.Starred {
-		_, err := d.sql.Exec(`DELETE FROM starred WHERE chat_jid = ? AND msg_id = ?`, chatJID, msgID)
-		return err
+		return d.q.SetStarredDelete(storeCtx(), storedb.SetStarredDeleteParams{ChatJid: chatJID, MsgID: msgID})
 	}
 	starredAt := p.StarredAt
 	if starredAt.IsZero() {
 		starredAt = nowUTC()
 	}
-	_, err := d.sql.Exec(`
-		INSERT INTO starred(chat_jid, msg_id, sender_jid, from_me, starred_at)
-		VALUES(?, ?, ?, ?, ?)
-		ON CONFLICT(chat_jid, msg_id) DO UPDATE SET
-			sender_jid=COALESCE(NULLIF(excluded.sender_jid,''), starred.sender_jid),
-			from_me=excluded.from_me,
-			starred_at=excluded.starred_at
-	`, chatJID, msgID, nullIfEmpty(p.SenderJID), boolToInt(p.FromMe), unix(starredAt))
-	return err
+	return d.q.SetStarredUpsert(storeCtx(), storedb.SetStarredUpsertParams{
+		ChatJid:   chatJID,
+		MsgID:     msgID,
+		SenderJid: nullString(p.SenderJID),
+		FromMe:    boolToInt64(p.FromMe),
+		StarredAt: unix(starredAt),
+	})
 }
 
 func (d *DB) ListStarredMessages(p ListStarredMessagesParams) ([]Message, error) {

@@ -1,9 +1,12 @@
 package store
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/openclaw/wacli/internal/store/storedb"
 )
 
 type ChatListFilter struct {
@@ -19,15 +22,12 @@ func (d *DB) UpsertChat(jid, kind, name string, lastTS time.Time) error {
 	if strings.TrimSpace(kind) == "" {
 		kind = "unknown"
 	}
-	_, err := d.sql.Exec(`
-		INSERT INTO chats(jid, kind, name, last_message_ts)
-		VALUES(?, ?, ?, ?)
-		ON CONFLICT(jid) DO UPDATE SET
-			kind=excluded.kind,
-			name=CASE WHEN excluded.name IS NOT NULL AND excluded.name != '' THEN excluded.name ELSE chats.name END,
-			last_message_ts=CASE WHEN excluded.last_message_ts > COALESCE(chats.last_message_ts, 0) THEN excluded.last_message_ts ELSE chats.last_message_ts END
-	`, jid, kind, name, unix(lastTS))
-	return err
+	return d.q.UpsertChat(storeCtx(), storedb.UpsertChatParams{
+		Jid:           jid,
+		Kind:          kind,
+		Name:          nullString(name),
+		LastMessageTs: sqlNullInt64(unix(lastTS)),
+	})
 }
 
 func (d *DB) ListChats(query string, limit int) ([]Chat, error) {
@@ -93,55 +93,30 @@ func (d *DB) ListChatsFiltered(f ChatListFilter) ([]Chat, error) {
 }
 
 func (d *DB) GetChat(jid string) (Chat, error) {
-	row := d.sql.QueryRow(`SELECT jid, kind, COALESCE(name,''), COALESCE(last_message_ts,0), COALESCE(archived,0), COALESCE(pinned,0), COALESCE(muted_until,0), COALESCE(unread,0) FROM chats WHERE jid = ?`, jid)
-	var c Chat
-	var ts int64
-	var archived, pinned, unread int
-	if err := row.Scan(&c.JID, &c.Kind, &c.Name, &ts, &archived, &pinned, &c.MutedUntil, &unread); err != nil {
+	row, err := d.q.GetChat(storeCtx(), jid)
+	if err != nil {
 		return Chat{}, err
 	}
-	c.LastMessageTS = fromUnix(ts)
-	c.Archived = archived != 0
-	c.Pinned = pinned != 0
-	c.Unread = unread != 0
-	return c, nil
+	return chatFromRow(row), nil
 }
 
 func (d *DB) SetChatArchived(jid string, archived bool) error {
-	pinned := ""
 	if archived {
-		pinned = ", pinned = 0"
+		return d.q.SetChatArchivedAndUnpin(storeCtx(), storedb.SetChatArchivedAndUnpinParams{Jid: jid, Archived: boolToInt64(archived)})
 	}
-	_, err := d.sql.Exec(`
-		INSERT INTO chats(jid, kind, archived) VALUES(?, 'unknown', ?)
-		ON CONFLICT(jid) DO UPDATE SET archived=excluded.archived`+pinned,
-		jid, boolToInt(archived),
-	)
-	return err
+	return d.q.SetChatArchived(storeCtx(), storedb.SetChatArchivedParams{Jid: jid, Archived: boolToInt64(archived)})
 }
 
 func (d *DB) SetChatPinned(jid string, pinned bool) error {
-	_, err := d.sql.Exec(`
-		INSERT INTO chats(jid, kind, pinned) VALUES(?, 'unknown', ?)
-		ON CONFLICT(jid) DO UPDATE SET pinned=excluded.pinned
-	`, jid, boolToInt(pinned))
-	return err
+	return d.q.SetChatPinned(storeCtx(), storedb.SetChatPinnedParams{Jid: jid, Pinned: boolToInt64(pinned)})
 }
 
 func (d *DB) SetChatMutedUntil(jid string, mutedUntil int64) error {
-	_, err := d.sql.Exec(`
-		INSERT INTO chats(jid, kind, muted_until) VALUES(?, 'unknown', ?)
-		ON CONFLICT(jid) DO UPDATE SET muted_until=excluded.muted_until
-	`, jid, mutedUntil)
-	return err
+	return d.q.SetChatMutedUntil(storeCtx(), storedb.SetChatMutedUntilParams{Jid: jid, MutedUntil: mutedUntil})
 }
 
 func (d *DB) SetChatUnread(jid string, unread bool) error {
-	_, err := d.sql.Exec(`
-		INSERT INTO chats(jid, kind, unread) VALUES(?, 'unknown', ?)
-		ON CONFLICT(jid) DO UPDATE SET unread=excluded.unread
-	`, jid, boolToInt(unread))
-	return err
+	return d.q.SetChatUnread(storeCtx(), storedb.SetChatUnreadParams{Jid: jid, Unread: boolToInt64(unread)})
 }
 
 func (d *DB) DeleteChat(jid string) error {
@@ -158,13 +133,15 @@ func (d *DB) DeleteChat(jid string) error {
 			_ = tx.Rollback()
 		}
 	}()
-	if _, err := tx.Exec(`DELETE FROM poll_votes WHERE chat_jid = ?`, jid); err != nil {
+	q := d.q.WithTx(tx)
+	ctx := storeCtx()
+	if err := q.DeletePollVotesForChat(ctx, jid); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM polls WHERE chat_jid = ?`, jid); err != nil {
+	if err := q.DeletePollsForChat(ctx, jid); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM chats WHERE jid = ?`, jid); err != nil {
+	if err := q.DeleteChat(ctx, jid); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -276,10 +253,22 @@ func (d *DB) CountChatMessages(jid string) (int64, error) {
 	if jid == "" {
 		return 0, fmt.Errorf("chat JID is required")
 	}
-	row := d.sql.QueryRow(`SELECT COUNT(1) FROM messages WHERE chat_jid = ?`, jid)
-	var n int64
-	if err := row.Scan(&n); err != nil {
-		return 0, err
+	return d.q.CountChatMessages(storeCtx(), jid)
+}
+
+func chatFromRow(row storedb.GetChatRow) Chat {
+	return Chat{
+		JID:           row.Jid,
+		Kind:          row.Kind,
+		Name:          row.Name,
+		LastMessageTS: fromUnix(row.LastMessageTs),
+		Archived:      row.Archived != 0,
+		Pinned:        row.Pinned != 0,
+		MutedUntil:    row.MutedUntil,
+		Unread:        row.Unread != 0,
 	}
-	return n, nil
+}
+
+func sqlNullInt64(n int64) sql.NullInt64 {
+	return sql.NullInt64{Int64: n, Valid: true}
 }

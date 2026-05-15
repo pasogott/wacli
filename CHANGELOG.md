@@ -23,6 +23,10 @@
 
 - Docs: document named accounts in the quickstart and surface accounts, channels, store, and integrations pages in the docs navigation. (#235 - thanks @mamarchk)
 
+### Chore
+
+- Store: generate typed SQLite query wrappers with sqlc for stable store reads and writes.
+
 ## 0.8.1 - 2026-05-08
 
 ### Changed

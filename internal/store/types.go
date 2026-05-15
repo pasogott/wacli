@@ -1,8 +1,10 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -135,12 +137,70 @@ func boolToInt(b bool) int {
 	return 0
 }
 
+func boolToInt64(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func nullIfEmpty(s string) interface{} {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return nil
 	}
 	return s
+}
+
+func nullString(s string) sql.NullString {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: s, Valid: true}
+}
+
+func nullStringIfEmpty(s string) sql.NullString {
+	if s == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: s, Valid: true}
+}
+
+func sqlString(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return x
+	case []byte:
+		return string(x)
+	default:
+		return fmt.Sprint(x)
+	}
+}
+
+func sqlInt64(v any) int64 {
+	switch x := v.(type) {
+	case nil:
+		return 0
+	case int64:
+		return x
+	case int:
+		return int64(x)
+	case []byte:
+		var n int64
+		_, _ = fmt.Sscan(string(x), &n)
+		return n
+	default:
+		var n int64
+		_, _ = fmt.Sscan(fmt.Sprint(x), &n)
+		return n
+	}
+}
+
+func storeCtx() context.Context {
+	return context.Background()
 }
 
 func (d *DB) HasFTS() bool { return d.ftsEnabled }

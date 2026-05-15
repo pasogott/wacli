@@ -393,14 +393,15 @@ func TestMediaDownloadInfoAndMarkDownloaded(t *testing.T) {
 	}
 
 	when := time.Date(2024, 3, 1, 0, 0, 1, 0, time.UTC)
-	if err := db.MarkMediaDownloaded(chat, "mid", "/tmp/file", when); err != nil {
+	localPath := "/tmp/file with trailing space "
+	if err := db.MarkMediaDownloaded(chat, "mid", localPath, when); err != nil {
 		t.Fatalf("MarkMediaDownloaded: %v", err)
 	}
 	info, err = db.GetMediaDownloadInfo(chat, "mid")
 	if err != nil {
 		t.Fatalf("GetMediaDownloadInfo: %v", err)
 	}
-	if info.LocalPath != "/tmp/file" {
+	if info.LocalPath != localPath {
 		t.Fatalf("expected LocalPath set, got %q", info.LocalPath)
 	}
 	if !info.DownloadedAt.Equal(when) {

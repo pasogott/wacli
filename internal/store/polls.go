@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/openclaw/wacli/internal/store/storedb"
 )
 
 // Poll represents a stored PollCreationMessage.
@@ -63,25 +65,15 @@ func (d *DB) UpsertPoll(p Poll) error {
 	if createdTS.IsZero() {
 		createdTS = nowUTC()
 	}
-	_, err = d.sql.Exec(`
-		INSERT INTO polls (chat_jid, msg_id, sender_jid, question, options_json, selectable_count, created_ts)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(chat_jid, msg_id) DO UPDATE SET
-			sender_jid = excluded.sender_jid,
-			question = excluded.question,
-			options_json = excluded.options_json,
-			selectable_count = excluded.selectable_count,
-			created_ts = excluded.created_ts
-	`,
-		p.ChatJID,
-		p.MsgID,
-		p.SenderJID,
-		p.Question,
-		string(optsJSON),
-		p.SelectableCount,
-		createdTS.UTC().Unix(),
-	)
-	if err != nil {
+	if err := d.q.UpsertPoll(storeCtx(), storedb.UpsertPollParams{
+		ChatJid:         p.ChatJID,
+		MsgID:           p.MsgID,
+		SenderJid:       nullString(p.SenderJID),
+		Question:        p.Question,
+		OptionsJson:     string(optsJSON),
+		SelectableCount: int64(p.SelectableCount),
+		CreatedTs:       createdTS.UTC().Unix(),
+	}); err != nil {
 		return fmt.Errorf("upsert poll: %w", err)
 	}
 	return nil
@@ -93,31 +85,11 @@ func (d *DB) GetPoll(chatJID, msgID string) (Poll, error) {
 	if d == nil {
 		return Poll{}, fmt.Errorf("nil db")
 	}
-	row := d.sql.QueryRow(`
-		SELECT p.chat_jid, p.msg_id, COALESCE(p.sender_jid,''), p.question, p.options_json, p.selectable_count, p.created_ts
-		FROM polls p
-		LEFT JOIN messages m ON m.chat_jid = p.chat_jid AND m.msg_id = p.msg_id
-		WHERE p.chat_jid = ? AND p.msg_id = ?
-		  AND (m.msg_id IS NULL OR (m.revoked = 0 AND m.deleted_for_me = 0))
-	`, chatJID, msgID)
-
-	var (
-		p          Poll
-		optsRaw    string
-		createdTS  int64
-		selectable int64
-	)
-	if err := row.Scan(&p.ChatJID, &p.MsgID, &p.SenderJID, &p.Question, &optsRaw, &selectable, &createdTS); err != nil {
+	row, err := d.q.GetPoll(storeCtx(), storedb.GetPollParams{ChatJid: chatJID, MsgID: msgID})
+	if err != nil {
 		return Poll{}, err
 	}
-	p.SelectableCount = uint32(selectable)
-	p.CreatedAt = time.Unix(createdTS, 0).UTC()
-	if optsRaw != "" {
-		if err := json.Unmarshal([]byte(optsRaw), &p.Options); err != nil {
-			return Poll{}, fmt.Errorf("unmarshal options: %w", err)
-		}
-	}
-	return p, nil
+	return pollFromGetRow(row)
 }
 
 // FindPollByMsgID returns the most recent poll matching the given msg_id
@@ -129,33 +101,11 @@ func (d *DB) FindPollByMsgID(msgID string) (Poll, error) {
 	if d == nil {
 		return Poll{}, fmt.Errorf("nil db")
 	}
-	row := d.sql.QueryRow(`
-		SELECT p.chat_jid, p.msg_id, COALESCE(p.sender_jid,''), p.question, p.options_json, p.selectable_count, p.created_ts
-		FROM polls p
-		LEFT JOIN messages m ON m.chat_jid = p.chat_jid AND m.msg_id = p.msg_id
-		WHERE p.msg_id = ?
-		  AND (m.msg_id IS NULL OR (m.revoked = 0 AND m.deleted_for_me = 0))
-		ORDER BY p.created_ts DESC
-		LIMIT 1
-	`, msgID)
-
-	var (
-		p          Poll
-		optsRaw    string
-		createdTS  int64
-		selectable int64
-	)
-	if err := row.Scan(&p.ChatJID, &p.MsgID, &p.SenderJID, &p.Question, &optsRaw, &selectable, &createdTS); err != nil {
+	row, err := d.q.FindPollByMsgID(storeCtx(), msgID)
+	if err != nil {
 		return Poll{}, err
 	}
-	p.SelectableCount = uint32(selectable)
-	p.CreatedAt = time.Unix(createdTS, 0).UTC()
-	if optsRaw != "" {
-		if err := json.Unmarshal([]byte(optsRaw), &p.Options); err != nil {
-			return Poll{}, fmt.Errorf("unmarshal options: %w", err)
-		}
-	}
-	return p, nil
+	return pollFromFindRow(row)
 }
 
 // ListPolls returns polls ordered most-recent-first.
@@ -171,13 +121,33 @@ func (d *DB) ListPolls(filter PollListFilter) ([]Poll, error) {
 	chatJIDs := cleanPollFilterChatJIDs(filter)
 	switch {
 	case len(chatJIDs) == 1:
-		q += " AND p.chat_jid = ?"
-		args = append(args, chatJIDs[0])
+		rows, err := d.q.ListPolls(storeCtx(), storedb.ListPollsParams{
+			Column1: chatJIDs[0],
+			ChatJid: chatJIDs[0],
+			Limit:   int64(limitOrAll(filter.Limit)),
+			Offset:  int64(filter.Offset),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("query polls: %w", err)
+		}
+		return pollsFromRows(rows)
 	case len(chatJIDs) > 1:
 		q += " AND p.chat_jid IN (?" + strings.Repeat(",?", len(chatJIDs)-1) + ")"
 		for _, chatJID := range chatJIDs {
 			args = append(args, chatJID)
 		}
+	}
+	if len(chatJIDs) == 0 {
+		rows, err := d.q.ListPolls(storeCtx(), storedb.ListPollsParams{
+			Column1: "",
+			ChatJid: "",
+			Limit:   int64(limitOrAll(filter.Limit)),
+			Offset:  int64(filter.Offset),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("query polls: %w", err)
+		}
+		return pollsFromRows(rows)
 	}
 	q += " ORDER BY p.created_ts DESC, p.msg_id DESC"
 	if filter.Limit > 0 {
@@ -260,23 +230,14 @@ func (d *DB) UpsertPollVote(v PollVote) error {
 	if ts.IsZero() {
 		ts = nowUTC()
 	}
-	_, err = d.sql.Exec(`
-		INSERT INTO poll_votes (chat_jid, poll_msg_id, voter_jid, vote_msg_id, selected_options_json, ts)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(chat_jid, poll_msg_id, voter_jid) DO UPDATE SET
-			vote_msg_id = excluded.vote_msg_id,
-			selected_options_json = excluded.selected_options_json,
-			ts = excluded.ts
-		WHERE excluded.ts >= poll_votes.ts
-	`,
-		v.ChatJID,
-		v.PollMsgID,
-		v.VoterJID,
-		v.VoteMsgID,
-		string(selJSON),
-		ts.UTC().UnixMilli(),
-	)
-	if err != nil {
+	if err := d.q.UpsertPollVote(storeCtx(), storedb.UpsertPollVoteParams{
+		ChatJid:             v.ChatJID,
+		PollMsgID:           v.PollMsgID,
+		VoterJid:            v.VoterJID,
+		VoteMsgID:           v.VoteMsgID,
+		SelectedOptionsJson: string(selJSON),
+		Ts:                  ts.UTC().UnixMilli(),
+	}); err != nil {
 		return fmt.Errorf("upsert poll vote: %w", err)
 	}
 	return nil
@@ -295,10 +256,12 @@ func (d *DB) DeletePollVote(chatJID, pollMsgID, voterJID string, votedAt time.Ti
 	if ts.IsZero() {
 		ts = nowUTC()
 	}
-	if _, err := d.sql.Exec(`
-		DELETE FROM poll_votes
-		WHERE chat_jid = ? AND poll_msg_id = ? AND voter_jid = ? AND ts <= ?
-	`, chatJID, pollMsgID, voterJID, ts.UTC().UnixMilli()); err != nil {
+	if err := d.q.DeletePollVote(storeCtx(), storedb.DeletePollVoteParams{
+		ChatJid:   chatJID,
+		PollMsgID: pollMsgID,
+		VoterJid:  voterJID,
+		Ts:        ts.UTC().UnixMilli(),
+	}); err != nil {
 		return fmt.Errorf("delete poll vote: %w", err)
 	}
 	return nil
@@ -309,45 +272,16 @@ func (d *DB) ListPollVotes(chatJID, pollMsgID string) ([]PollVote, error) {
 	if d == nil {
 		return nil, fmt.Errorf("nil db")
 	}
-	rows, err := d.sql.Query(`
-		SELECT chat_jid, poll_msg_id, voter_jid, vote_msg_id, selected_options_json, ts
-		FROM poll_votes
-		WHERE chat_jid = ? AND poll_msg_id = ?
-		ORDER BY ts ASC, voter_jid ASC
-	`, chatJID, pollMsgID)
+	rows, err := d.q.ListPollVotes(storeCtx(), storedb.ListPollVotesParams{ChatJid: chatJID, PollMsgID: pollMsgID})
 	if err != nil {
 		return nil, fmt.Errorf("query poll votes: %w", err)
 	}
-	defer rows.Close()
-
-	var out []PollVote
-	for rows.Next() {
-		var (
-			v       PollVote
-			selRaw  string
-			tsEpoch int64
-		)
-		if err := rows.Scan(&v.ChatJID, &v.PollMsgID, &v.VoterJID, &v.VoteMsgID, &selRaw, &tsEpoch); err != nil {
-			return nil, fmt.Errorf("scan poll vote: %w", err)
-		}
-		v.VotedAt = time.UnixMilli(tsEpoch).UTC()
-		if selRaw != "" {
-			if err := json.Unmarshal([]byte(selRaw), &v.Selected); err != nil {
-				return nil, fmt.Errorf("unmarshal selected: %w", err)
-			}
-		}
-		out = append(out, v)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return pollVotesFromRows(rows)
 }
 
 func (d *DB) pollOptions(chatJID, msgID string) ([]string, error) {
-	row := d.sql.QueryRow(`SELECT options_json FROM polls WHERE chat_jid = ? AND msg_id = ?`, chatJID, msgID)
-	var raw string
-	if err := row.Scan(&raw); err != nil {
+	raw, err := d.q.PollOptions(storeCtx(), storedb.PollOptionsParams{ChatJid: chatJID, MsgID: msgID})
+	if err != nil {
 		return nil, err
 	}
 	var options []string
@@ -388,10 +322,12 @@ func (d *DB) DeletePoll(chatJID, msgID string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.Exec(`DELETE FROM poll_votes WHERE chat_jid = ? AND poll_msg_id = ?`, chatJID, msgID); err != nil {
+	q := d.q.WithTx(tx)
+	ctx := storeCtx()
+	if err := q.DeletePollVotesForPoll(ctx, storedb.DeletePollVotesForPollParams{ChatJid: chatJID, PollMsgID: msgID}); err != nil {
 		return fmt.Errorf("delete poll votes: %w", err)
 	}
-	if _, err := tx.Exec(`DELETE FROM polls WHERE chat_jid = ? AND msg_id = ?`, chatJID, msgID); err != nil {
+	if err := q.DeletePoll(ctx, storedb.DeletePollParams{ChatJid: chatJID, MsgID: msgID}); err != nil {
 		return fmt.Errorf("delete poll: %w", err)
 	}
 	return tx.Commit()
@@ -400,4 +336,68 @@ func (d *DB) DeletePoll(chatJID, msgID string) error {
 // IsPollNotFound is a small convenience predicate.
 func IsPollNotFound(err error) bool {
 	return errors.Is(err, sql.ErrNoRows)
+}
+
+func limitOrAll(limit int) int {
+	if limit > 0 {
+		return limit
+	}
+	return 1_000_000_000
+}
+
+func pollFromGetRow(row storedb.GetPollRow) (Poll, error) {
+	return pollFromScalars(row.ChatJid, row.MsgID, row.SenderJid, row.Question, row.OptionsJson, row.SelectableCount, row.CreatedTs)
+}
+
+func pollFromFindRow(row storedb.FindPollByMsgIDRow) (Poll, error) {
+	return pollFromScalars(row.ChatJid, row.MsgID, row.SenderJid, row.Question, row.OptionsJson, row.SelectableCount, row.CreatedTs)
+}
+
+func pollsFromRows(rows []storedb.ListPollsRow) ([]Poll, error) {
+	out := make([]Poll, 0, len(rows))
+	for _, row := range rows {
+		p, err := pollFromScalars(row.ChatJid, row.MsgID, row.SenderJid, row.Question, row.OptionsJson, row.SelectableCount, row.CreatedTs)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+func pollFromScalars(chatJID, msgID, senderJID, question, optsRaw string, selectable, createdTS int64) (Poll, error) {
+	p := Poll{
+		ChatJID:         chatJID,
+		MsgID:           msgID,
+		SenderJID:       senderJID,
+		Question:        question,
+		SelectableCount: uint32(selectable),
+		CreatedAt:       time.Unix(createdTS, 0).UTC(),
+	}
+	if optsRaw != "" {
+		if err := json.Unmarshal([]byte(optsRaw), &p.Options); err != nil {
+			return Poll{}, fmt.Errorf("unmarshal options: %w", err)
+		}
+	}
+	return p, nil
+}
+
+func pollVotesFromRows(rows []storedb.PollVote) ([]PollVote, error) {
+	out := make([]PollVote, 0, len(rows))
+	for _, row := range rows {
+		v := PollVote{
+			ChatJID:   row.ChatJid,
+			PollMsgID: row.PollMsgID,
+			VoterJID:  row.VoterJid,
+			VoteMsgID: row.VoteMsgID,
+			VotedAt:   time.UnixMilli(row.Ts).UTC(),
+		}
+		if row.SelectedOptionsJson != "" {
+			if err := json.Unmarshal([]byte(row.SelectedOptionsJson), &v.Selected); err != nil {
+				return nil, fmt.Errorf("unmarshal selected: %w", err)
+			}
+		}
+		out = append(out, v)
+	}
+	return out, nil
 }

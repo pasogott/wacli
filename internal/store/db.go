@@ -9,11 +9,13 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/openclaw/wacli/internal/fsutil"
 	"github.com/openclaw/wacli/internal/sqliteutil"
+	"github.com/openclaw/wacli/internal/store/storedb"
 )
 
 type DB struct {
 	path       string
 	sql        *sql.DB
+	q          *storedb.Queries
 	ftsEnabled bool
 }
 
@@ -34,7 +36,7 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
 
-	s := &DB{path: path, sql: db}
+	s := &DB{path: path, sql: db, q: storedb.New(db)}
 	if err := s.init(); err != nil {
 		_ = db.Close()
 		return nil, err

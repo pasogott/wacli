@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup CI Environment
         uses: ./.github/actions/setup-ci-env
@@ -46,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
 
@@ -57,22 +57,22 @@ jobs:
           apt-packages: "build-essential gcc-aarch64-linux-gnu libc6-dev-arm64-cross"
 
       - name: GoReleaser check (macOS)
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
           distribution: goreleaser
-          version: "~> v2"
+          version: v2.15.4
           args: check --config .goreleaser.yaml
 
       - name: GoReleaser check (linux/windows)
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
           distribution: goreleaser
-          version: "~> v2"
+          version: v2.15.4
           args: check --config .goreleaser-linux-windows.yaml
 
       - name: GoReleaser build (linux amd64/arm64)
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
           distribution: goreleaser
-          version: "~> v2"
+          version: v2.15.4
           args: build --snapshot --clean --config .goreleaser-linux-windows.yaml --id wacli_linux_amd64 --id wacli_linux_arm64

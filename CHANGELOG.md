@@ -7,6 +7,10 @@
 - Send: add `wacli send status` for WhatsApp status broadcasts, including text statuses with optional background/font and media statuses with captions. (#247 - thanks @dovocoder)
 - Store: persist synced and locally sent status broadcasts separately in `status_messages` instead of mixing them into normal chat messages.
 
+### Security
+
+- CI: pin GitHub Actions and Docker base images to immutable refs and pin GoReleaser to an exact version.
+
 ### Fixed
 
 - History: unwrap edited WhatsApp messages during history sync and backfill so stored/searchable text shows the edited body instead of `(message)`. (#246 - thanks @hiasinho)

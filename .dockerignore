@@ -2,6 +2,13 @@
 .github
 .DS_Store
 .env
+.wacli/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+LOCK
+accounts/
 *.out
 *.test
 coverage.*

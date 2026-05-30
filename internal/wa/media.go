@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/openclaw/wacli/internal/fsutil"
 	"go.mau.fi/whatsmeow"
@@ -23,6 +24,16 @@ import (
 const MaxMediaDownloadSize = 100 * 1024 * 1024
 
 var directMediaBaseURL = "https://mmg.whatsapp.net"
+
+var directMediaHTTPClient = newDirectMediaHTTPClient()
+
+func newDirectMediaHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = 10 * time.Second
+	return &http.Client{
+		Transport: transport,
+	}
+}
 
 // WhatsApp writes encrypted media as padded ciphertext plus a 10-byte MAC before
 // truncating and decrypting it in place.
@@ -258,7 +269,7 @@ func downloadDirectBytes(ctx context.Context, mediaURL string) ([]byte, error) {
 	}
 	req.Header.Set("Origin", socket.Origin)
 	req.Header.Set("Referer", socket.Origin+"/")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := directMediaHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

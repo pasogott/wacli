@@ -198,8 +198,16 @@ export function assertCodeSignatureIdentity(displayText, requirementText) {
     throw new Error("signature is missing a trusted timestamp");
   }
 
-  const requirement = String(requirementText).replace(/\s+/g, " ").trim();
-  if (requirement !== RELEASE_DESIGNATED_REQUIREMENT) {
+  const normalizeRequirement = (text) =>
+    String(text)
+      .replace(/\s+/g, " ")
+      // codesign's display normalization drops quotes around alphanumeric
+      // values (leaf[subject.OU] = FWJYW4S8P8 vs = "FWJYW4S8P8"); compare
+      // both sides without them so the check is not display-format-brittle.
+      .replace(/"([A-Za-z0-9.]+)"/g, "$1")
+      .trim();
+  const requirement = normalizeRequirement(requirementText);
+  if (requirement !== normalizeRequirement(RELEASE_DESIGNATED_REQUIREMENT)) {
     throw new Error(`embedded designated requirement mismatch: ${JSON.stringify(requirement)}`);
   }
 }

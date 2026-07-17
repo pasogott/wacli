@@ -205,6 +205,9 @@ export function assertCodeSignatureIdentity(displayText, requirementText) {
       // values (leaf[subject.OU] = FWJYW4S8P8 vs = "FWJYW4S8P8"); compare
       // both sides without them so the check is not display-format-brittle.
       .replace(/"([A-Za-z0-9.]+)"/g, "$1")
+      // some codesign versions append the "Executable=..." header line to
+      // the requirements output; it is not part of the requirement itself.
+      .replace(/ Executable=.*$/, "")
       .trim();
   const requirement = normalizeRequirement(requirementText);
   if (requirement !== normalizeRequirement(RELEASE_DESIGNATED_REQUIREMENT)) {

@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.13.1 - Unreleased
+## 0.14.0 - 2026-07-19
+
+### Highlights
+
+- Deleted messages now keep their original payload behind timestamped tombstones, with an explicit confirmation-gated purge command for irreversible erasure.
+- Message edits now delegate through a running `sync --follow` process instead of failing while the sync process owns the store lock. (#310 - thanks @Umair444)
+- Text replies can again quote stored documents and other supported media. (#307 - thanks @suifatt7799-oss)
 
 ### Added
 
@@ -9,6 +15,7 @@
 ### Changed
 
 - Messages: retain original text, interactive, reply, and media metadata behind timestamped deletion tombstones; keep sync/history imports merge-only so missing rows never imply deletion.
+- WhatsApp compatibility: update `whatsmeow` for the latest protocol definitions and its required utility module.
 
 ### Fixed
 

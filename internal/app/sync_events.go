@@ -90,25 +90,19 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			}
 			a.handleLiveSyncMessage(ctx, opts, v, messagesStored, enqueueMedia, enqueueWebhook, limits)
 		case *events.CallOffer, *events.CallAccept, *events.CallPreAccept, *events.CallTransport,
-			*events.CallOfferNotice, *events.CallRelayLatency, *events.CallTerminate, *events.CallReject,
-			*events.AppState:
+			*events.CallOfferNotice, *events.CallRelayLatency, *events.CallTerminate, *events.CallReject:
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleLiveCallEvent(ctx, v)
+		case *events.AppState, *events.Star, *events.DeleteForMe,
+			*events.Archive, *events.Pin, *events.Mute, *events.MarkChatAsRead:
+			lastEvent.Store(nowUTC().UnixNano())
+			a.handleAppStatePersistenceEvent(ctx, v, nil)
 		case *events.HistorySync:
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleHistorySync(ctx, opts, v, messagesStored, lastEvent, enqueueMedia, limits)
-		case *events.Star:
-			lastEvent.Store(nowUTC().UnixNano())
-			a.handleStarEvent(ctx, v)
 		case *events.Receipt:
 			lastEvent.Store(nowUTC().UnixNano())
-			a.handleReceiptEvent(ctx, v)
-		case *events.DeleteForMe:
-			lastEvent.Store(nowUTC().UnixNano())
-			a.handleDeleteForMeEvent(ctx, v)
-		case *events.Archive, *events.Pin, *events.Mute, *events.MarkChatAsRead:
-			lastEvent.Store(nowUTC().UnixNano())
-			a.handleChatStateEvent(ctx, v)
+			a.handleReceiptPersistenceEvent(ctx, v)
 		case *events.Connected:
 			a.emitOrPrint("connected", nil, "\nConnected.\n")
 			ps.mu.Lock()
@@ -188,10 +182,130 @@ func syncActivityEvent(evt interface{}) bool {
 	}
 }
 
-func (a *App) handleReceiptEvent(ctx context.Context, evt *events.Receipt) {
+func (a *App) handleAppStatePersistenceEvent(ctx context.Context, evt interface{}, tracker *appStatePersistenceTracker) {
+	if tracker != nil {
+		a.persistAppStateEvent(ctx, evt, tracker)
+		return
+	}
+	ticket := a.appStatePersist.reserveLive()
+	markers, markerErr := a.markLiveAppStateRecovery(evt)
+	if markerErr != nil {
+		a.emitWarning(
+			"app_state_recovery_marker_failed",
+			fmt.Sprintf("warning: failed to mark live app state recovery: %v", markerErr),
+			map[string]any{"error": markerErr.Error()},
+		)
+		persistCtx := context.WithoutCancel(ctx)
+		a.persistAppStateEvent(persistCtx, evt, nil)
+		retryMarkers, retryErr := a.markLiveAppStateRecovery(evt)
+		if retryErr != nil {
+			a.emitWarning(
+				"app_state_recovery_marker_failed",
+				fmt.Sprintf("warning: failed to restore live app state recovery before ordered replay: %v", retryErr),
+				map[string]any{"error": retryErr.Error()},
+			)
+		}
+		a.appStatePersist.completeOne(ticket, func() {
+			orderedErr := a.persistAppStateEvent(persistCtx, evt, nil)
+			if orderedErr == nil {
+				a.clearLiveAppStateRecovery(retryMarkers)
+			} else if retryErr != nil {
+				if _, finalMarkerErr := a.markLiveAppStateRecovery(evt); finalMarkerErr != nil {
+					a.emitWarning(
+						"app_state_recovery_marker_failed",
+						fmt.Sprintf("warning: failed to restore live app state recovery after ordered replay failure: %v", finalMarkerErr),
+						map[string]any{"error": finalMarkerErr.Error()},
+					)
+				}
+			}
+		})
+		return
+	}
+	persistCtx := context.WithoutCancel(ctx)
+	a.appStatePersist.completeOne(ticket, func() {
+		persistenceErr := a.persistAppStateEvent(persistCtx, evt, nil)
+		if persistenceErr == nil {
+			a.clearLiveAppStateRecovery(markers)
+		}
+	})
+}
+
+type appStateRecoveryMarker struct {
+	collection appstate.WAPatchName
+	generation int64
+}
+
+func (a *App) markLiveAppStateRecovery(evt interface{}) ([]appStateRecoveryMarker, error) {
+	collections := appStateCollectionsForEvent(evt)
+	names := make([]string, len(collections))
+	for i, collection := range collections {
+		names[i] = string(collection)
+	}
+	generations, err := a.db.MarkAppStateRecoveryGenerations(names)
+	if err != nil {
+		return nil, err
+	}
+	markers := make([]appStateRecoveryMarker, 0, len(collections))
+	for i, collection := range collections {
+		markers = append(markers, appStateRecoveryMarker{collection: collection, generation: generations[i]})
+	}
+	return markers, nil
+}
+
+func (a *App) clearLiveAppStateRecovery(markers []appStateRecoveryMarker) {
+	for _, marker := range markers {
+		if err := a.db.ClearAppStateRecoveryIntent(string(marker.collection), marker.generation); err != nil {
+			a.emitWarning(
+				"app_state_recovery_marker_clear_failed",
+				fmt.Sprintf("warning: failed to clear live app state recovery for %s: %v", marker.collection, err),
+				map[string]any{"collection": string(marker.collection), "error": err.Error()},
+			)
+		}
+	}
+}
+
+func (a *App) persistAppStateEvent(ctx context.Context, evt interface{}, tracker *appStatePersistenceTracker) error {
+	var err error
+	switch v := evt.(type) {
+	case *events.AppState:
+		err = a.handleLiveCallEvent(ctx, v)
+	case *events.Star:
+		err = a.handleStarEvent(ctx, v)
+	case *events.DeleteForMe:
+		err = a.handleDeleteForMeEvent(ctx, v)
+	case *events.Archive, *events.Pin, *events.Mute, *events.MarkChatAsRead:
+		err = a.handleChatStateEvent(ctx, v)
+	}
+	if tracker != nil {
+		tracker.record(err)
+	}
+	return err
+}
+
+func appStateCollectionsForEvent(evt interface{}) []appstate.WAPatchName {
+	switch v := evt.(type) {
+	case *events.Archive, *events.Pin, *events.MarkChatAsRead:
+		return []appstate.WAPatchName{appstate.WAPatchRegularLow}
+	case *events.Mute, *events.Star, *events.DeleteForMe:
+		return []appstate.WAPatchName{appstate.WAPatchRegularHigh}
+	case *events.AppState:
+		if v == nil || v.SyncActionValue == nil || (v.GetCallLogAction() == nil && v.GetDeleteIndividualCallLog() == nil) {
+			return nil
+		}
+		return appstate.AllPatchNames[:]
+	default:
+		return nil
+	}
+}
+
+func (a *App) handleReceiptPersistenceEvent(ctx context.Context, evt *events.Receipt) {
 	if evt == nil || evt.Type != types.ReceiptTypeReadSelf || evt.Chat.IsEmpty() {
 		return
 	}
+	a.handleReceiptEvent(ctx, evt)
+}
+
+func (a *App) handleReceiptEvent(ctx context.Context, evt *events.Receipt) {
 	chat := a.canonicalStoreJID(ctx, evt.Chat)
 	if err := a.db.SetChatUnreadCount(canonicalJIDString(chat), 0); err != nil {
 		a.emitWarning(
@@ -202,9 +316,9 @@ func (a *App) handleReceiptEvent(ctx context.Context, evt *events.Receipt) {
 	}
 }
 
-func (a *App) handleDeleteForMeEvent(ctx context.Context, evt *events.DeleteForMe) {
+func (a *App) handleDeleteForMeEvent(ctx context.Context, evt *events.DeleteForMe) error {
 	if evt == nil || evt.ChatJID.IsEmpty() || strings.TrimSpace(evt.MessageID) == "" {
-		return
+		return nil
 	}
 	chat := a.canonicalStoreJID(ctx, evt.ChatJID)
 	chatJID := canonicalJIDString(chat)
@@ -214,7 +328,7 @@ func (a *App) handleDeleteForMeEvent(ctx context.Context, evt *events.DeleteForM
 			fmt.Sprintf("warning: failed to store chat for delete-for-me message %s: %v", evt.MessageID, err),
 			map[string]any{"message_id": evt.MessageID, "error": err.Error()},
 		)
-		return
+		return err
 	}
 
 	senderJID := ""
@@ -232,10 +346,12 @@ func (a *App) handleDeleteForMeEvent(ctx context.Context, evt *events.DeleteForM
 			fmt.Sprintf("warning: failed to store delete-for-me state for message %s: %v", evt.MessageID, err),
 			map[string]any{"message_id": evt.MessageID, "error": err.Error()},
 		)
+		return err
 	}
+	return nil
 }
 
-func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) {
+func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) error {
 	self := a.linkedLiveCallIdentity()
 	var alternateSelf []types.JID
 	if _, ok := evt.(*events.AppState); ok {
@@ -245,6 +361,8 @@ func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) {
 			alternateSelf = identities[1:]
 		}
 	}
+	// Each whatsmeow app-state event carries one call-log action; this parser
+	// returns one call record, while that record may contain many participants.
 	call, ok := wa.ParseLiveCallEvent(evt, self, alternateSelf...)
 	if ok {
 		if err := a.storeParsedCallEvent(ctx, call, "", ""); err != nil {
@@ -253,13 +371,14 @@ func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) {
 				fmt.Sprintf("warning: failed to store call event %s: %v", call.EventType, err),
 				map[string]any{"event_type": call.EventType, "call_id": call.CallID, "error": err.Error()},
 			)
+			return err
 		}
-		return
+		return nil
 	}
 
 	deleted, ok := wa.ParseCallLogDeleteEvent(evt)
 	if !ok {
-		return
+		return nil
 	}
 	if err := a.deleteParsedCallEvents(ctx, deleted); err != nil {
 		a.emitWarning(
@@ -267,7 +386,9 @@ func (a *App) handleLiveCallEvent(ctx context.Context, evt interface{}) {
 			fmt.Sprintf("warning: failed to delete call log events: %v", err),
 			map[string]any{"chat_jid": deleted.Chat.String(), "direction": deleted.Direction, "error": err.Error()},
 		)
+		return err
 	}
+	return nil
 }
 
 func (a *App) linkedCallIdentities() []types.JID {
@@ -294,9 +415,9 @@ func (a *App) linkedLiveCallIdentity() types.JID {
 	return types.JID{}
 }
 
-func (a *App) handleStarEvent(ctx context.Context, evt *events.Star) {
+func (a *App) handleStarEvent(ctx context.Context, evt *events.Star) error {
 	if evt == nil || evt.ChatJID.IsEmpty() || strings.TrimSpace(evt.MessageID) == "" || evt.Action == nil {
-		return
+		return nil
 	}
 	senderJID := ""
 	if !evt.SenderJID.IsEmpty() {
@@ -315,11 +436,16 @@ func (a *App) handleStarEvent(ctx context.Context, evt *events.Star) {
 			fmt.Sprintf("warning: failed to store starred state for message %s: %v", evt.MessageID, err),
 			map[string]any{"message_id": evt.MessageID, "error": err.Error()},
 		)
+		return err
 	}
+	return nil
 }
 
 func (a *App) handleAppStateSyncError(ctx context.Context, evt *events.AppStateSyncError, recoveries *sync.Map) {
 	if evt == nil || !errors.Is(evt.Error, appstate.ErrMismatchingLTHash) {
+		return
+	}
+	if a.ownsManualAppStateFetch(evt.Name) {
 		return
 	}
 	name := strings.TrimSpace(string(evt.Name))

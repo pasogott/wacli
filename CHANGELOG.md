@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Sync: include locally resolved chat names in webhook payloads when available. (#312 - thanks @g1e2x87)
+
 ## 0.14.0 - 2026-07-19
 
 ### Highlights
